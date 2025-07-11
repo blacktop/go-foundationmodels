@@ -18,7 +18,7 @@ before:
 
 builds:
   - id: default
-    main: ./cmd/found
+    dir: cmd/found
     binary: found
     env:
       - CGO_ENABLED=0
@@ -113,6 +113,6 @@ release:
     ### Summary
     **Full Changelog**: https://github.com/blacktop/go-foundationmodels/compare/{{ .PreviousTag }}...{{ .Tag }}
     ## What to do next?
-    - Follow us on [Twitter](https://twitter.com/blacktop__)
+    - Follow us on [Twitter](https://x.com/blacktop__)
     - Follow us on [Mastodon](https://mastodon.social/@blacktop)
     - Follow us on [Bluesky](https://bsky.app/profile/blacktop.bsky.social)
