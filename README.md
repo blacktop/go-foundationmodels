@@ -6,7 +6,7 @@
 </picture>
 
   <h1 align="center">go-foundationmodels</h1>
-  <h4><p align="center">🚀 Pure Go wrapper for Apple's Foundation Models framework with advanced features like generation options, tool validation, and context cancellation.
+  <h4><p align="center">🚀 Pure Go wrapper for Apple's Foundation Models
 </p></h4>
   <p align="center">
     <a href="https://github.com/blacktop/go-foundationmodels/actions" alt="Actions">
