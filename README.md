@@ -102,6 +102,12 @@ func main() {
 
 ## CLI tool `found`
 
+Install with Homebrew:
+
+```bash
+brew install blacktop/tap/found
+```
+
 Install with Go:
 
 ```bash
