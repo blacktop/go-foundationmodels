@@ -41,18 +41,16 @@
 #   Show                            Show the subsequent commands in the output
 
 Output vhs.gif
-Output vhs.mp4
-Output vhs.webm
 
 Set FontSize 22
 Set Width 1200
-Set Height 600
+Set Height 800
 Set PlaybackSpeed 2
 
-Type "echo Welcome to VHS Action! 📼"
+Type "./found quest --system 'You are a hopeless romantic' 'Tell me a quick poem about AI'"
 
 Sleep 500ms
 
 Enter
 
-Sleep 2s
+Sleep 10s

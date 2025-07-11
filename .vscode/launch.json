@@ -5,7 +5,17 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Attach to TEMPLATE",
+            "name": "found",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceRoot}/cmd/found/main.go",
+            "cwd": "${workspaceRoot}",
+            "args": [],
+            "showLog": false
+        },
+        {
+            "name": "Attach to found",
             "type": "go",
             "debugAdapter": "dlv-dap",
             "request": "attach",

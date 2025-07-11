@@ -18,16 +18,14 @@ before:
 
 builds:
   - id: default
-    binary: TEMPLATE
+    main: ./cmd/found
+    binary: found
     env:
       - CGO_ENABLED=0
     goos:
-      - linux
-      - windows
       - darwin
-    ignore:
-      - goos: windows
-        goarch: arm
+    goarch:
+      - arm64
     mod_timestamp: "{{ .CommitTimestamp }}"
     flags:
       - -trimpath
@@ -66,16 +64,16 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     goarm: "7"
-    homepage: https://github.com/blacktop/TEMPLATE
-    description: TEMPLATE
+    homepage: https://github.com/blacktop/go-foundationmodels
+    description: Lightweight Go package for on-device AI text generation using macOS 26 Tahoe's Foundation Models framework.
     license: MIT
     install: |
-      bin.install "TEMPLATE"
-      bash_completion.install "completions/_bash" => "TEMPLATE"
-      zsh_completion.install "completions/_zsh" => "_TEMPLATE"
-      fish_completion.install "completions/_fish" => "TEMPLATE.fish"
+      bin.install "found"
+      bash_completion.install "completions/_bash" => "found"
+      zsh_completion.install "completions/_zsh" => "_found"
+      fish_completion.install "completions/_fish" => "found.fish"
     test: |
-      system "#{bin}/TEMPLATE --help"
+      system "#{bin}/found --help"
 
 changelog:
   sort: asc
@@ -113,7 +111,7 @@ changelog:
 release:
   footer: |
     ### Summary
-    **Full Changelog**: https://github.com/blacktop/TEMPLATE/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/blacktop/go-foundationmodels/compare/{{ .PreviousTag }}...{{ .Tag }}
     ## What to do next?
     - Follow us on [Twitter](https://twitter.com/blacktop__)
     - Follow us on [Mastodon](https://mastodon.social/@blacktop)
