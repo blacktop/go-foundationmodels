@@ -32,26 +32,26 @@ Apple's Foundation Models provides powerful on-device AI capabilities in macOS 2
 
 ## Features
 
-### 🎛️ **Generation Control**
+### Generation Control
 - **Temperature control**: Deterministic (0.0) to creative (1.0) output
 - **Token limiting**: Control response length with max tokens
 - **Helper functions**: `WithDeterministic()`, `WithCreative()`, `WithBalanced()`
 
-### 🔧 **Advanced Tool System** ⚠️ **(BETA)**
+### Advanced Tool System ⚠️ **(BETA)**
 - **Custom tool creation**: Define tools that AI can call
 - **Input validation**: Type checking, required fields, enum constraints, regex patterns
 - **Automatic error handling**: Comprehensive validation before execution
 
-> [!WARNING] 
+> [!WARNING]
 > Tool calling is currently not working reliably - under active development
 
-### ⏱️ **Context Management**
+### Context Management
 - **Timeout support**: Cancel long-running requests automatically
 - **Manual cancellation**: User-controlled request cancellation
 - **Context tracking**: 4096-token window with usage monitoring
 - **Session refresh**: Seamless context window management
 
-### 🏗️ **Robust Architecture**
+### Robust Architecture
 - **Pure Go implementation**: No CGO dependencies, uses purego for Swift bridge
 - **Memory safety**: Automatic C string cleanup and proper resource management
 - **Error resilience**: Graceful initialization failure handling
@@ -85,15 +85,15 @@ func main() {
     if fm.CheckModelAvailability() != fm.ModelAvailable {
         log.Fatal("Foundation Models not available")
     }
-    
+
     // Create session
     sess := fm.NewSession()
     defer sess.Release()
-    
+
     // Generate text
     response := sess.Respond("What is artificial intelligence?", nil)
     fmt.Println(response)
-    
+
     // Use generation options
     creative := sess.Respond("Write a story", fm.WithCreative())
     fmt.Println(creative)
