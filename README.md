@@ -22,7 +22,7 @@
 
 ## Why? 🤔
 
-Apple's Foundation Models provides powerful on-device AI capabilities in macOS 26 Tahoe, but it's only accessible through Swift/Objective-C APIs. This package bridges that gap, offering:
+Apple's [Foundation Models](https://developer.apple.com/documentation/foundationmodels) provides powerful on-device AI capabilities in macOS 26 Tahoe, but it's only accessible through Swift/Objective-C APIs. This package bridges that gap, offering:
 
 - **🔒 Privacy-focused**: All AI processing happens on-device, no data leaves your Mac
 - **⚡ High performance**: Optimized for Apple Silicon with no network latency
