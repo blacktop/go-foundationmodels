@@ -41,12 +41,17 @@ func (c *CalculatorTool) Name() string {
 }
 
 func (c *CalculatorTool) Description() string {
-	return "Performs basic arithmetic operations (add, subtract, multiply, divide)"
+	return "Performs mathematical calculations"
 }
 
 // ValidateArguments validates the calculator tool arguments
 func (c *CalculatorTool) ValidateArguments(args map[string]any) error {
 	return fm.ValidateToolArguments(args, calculatorArgDefs)
+}
+
+// GetParameters returns the parameter definitions for the calculator tool
+func (c *CalculatorTool) GetParameters() []fm.ToolArgument {
+	return calculatorArgDefs
 }
 
 func (c *CalculatorTool) Execute(args map[string]any) (fm.ToolResult, error) {
@@ -152,17 +157,15 @@ This is a beta feature under active development.`,
 		}
 		
 		// Create session with calculator instructions
-		instructions := `You are a helpful calculator assistant with access to a calculator tool.
+		instructions := `You are a helpful assistant with access to a calculator function.
 
-IMPORTANT: You MUST use the calculator tool for any mathematical calculations. Do not perform calculations yourself.
+When users ask math questions:
+- ALWAYS use the calculator function for arithmetic
+- Never calculate numbers yourself
+- Only provide results after using the calculator function
+- Show the calculation clearly
 
-When a user asks a math question:
-1. ALWAYS call the calculator tool with the appropriate parameters (a, b, operation)
-2. Wait for the result from the tool
-3. Only provide the final answer after receiving the tool result
-4. Show your work and explain the calculation using the tool result
-
-Never perform mathematical calculations without using the calculator tool.`
+You must use the calculator function for all mathematical operations.`
 		sess := fm.NewSessionWithInstructions(instructions)
 		if sess == nil {
 			log.Fatal("Failed to create session")

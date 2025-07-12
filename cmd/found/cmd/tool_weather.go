@@ -54,15 +54,30 @@ type Location struct {
 	State   string
 }
 
+// Define argument definitions for validation
+var weatherArgDefs = []fm.ToolArgument{
+	{
+		Name:        "location",
+		Type:        "string",
+		Description: "City or location name",
+		Required:    true,
+	},
+}
+
 // WeatherTool fetches weather information from API
 type WeatherTool struct{}
 
 func (w *WeatherTool) Name() string {
-	return "weather"
+	return "checkWeather"
 }
 
 func (w *WeatherTool) Description() string {
-	return "Gets current weather information for a location using zip code or city name"
+	return "Check current weather conditions"
+}
+
+// GetParameters returns the parameter definitions for the weather tool
+func (w *WeatherTool) GetParameters() []fm.ToolArgument {
+	return weatherArgDefs
 }
 
 func (w *WeatherTool) Execute(args map[string]any) (fm.ToolResult, error) {
@@ -108,26 +123,21 @@ func (w *WeatherTool) Execute(args map[string]any) (fm.ToolResult, error) {
 	// Convert wind speed from km/h to mph
 	windMph := weatherData.Current.WindSpeed * 0.621371
 
-	// Format weather information with debug data
-	weatherInfo := fmt.Sprintf(`REAL WEATHER DATA for %s (%.4f, %.4f):
+	// Format weather information
+	weatherInfo := fmt.Sprintf(`Current conditions for %s:
 Temperature: %.1f°F (%.1f°C)
-Condition: %s (Code: %d)
+Condition: %s
 Humidity: %d%%
-Wind: %.1f mph %s (%d degrees)
+Wind: %.1f mph %s
 Pressure: %.1f hPa
-Timestamp: %s
-DEBUG: This is REAL data from OpenMeteo API, not AI hallucination!`,
+Last updated: %s`,
 		location.Name,
-		location.Lat,
-		location.Lon,
 		tempF,
 		weatherData.Current.Temperature,
 		condition,
-		weatherData.Current.WeatherCode,
 		weatherData.Current.Humidity,
 		windMph,
 		windDir,
-		weatherData.Current.WindDir,
 		weatherData.Current.Pressure,
 		weatherData.Current.Time)
 
@@ -140,46 +150,46 @@ DEBUG: This is REAL data from OpenMeteo API, not AI hallucination!`,
 func geocodeLocation(location string) (*Location, error) {
 	// URL encode the location
 	encodedLocation := url.QueryEscape(location)
-	
+
 	// Use OpenStreetMap Nominatim API (free, no API key required)
 	apiURL := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1", encodedLocation)
-	
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to geocode location: %v", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("geocoding API request failed with status: %d", resp.StatusCode)
 	}
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read geocoding response: %v", err)
 	}
-	
+
 	var geoResponse GeocodingResponse
 	if err := json.Unmarshal(body, &geoResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse geocoding response: %v", err)
 	}
-	
+
 	if len(geoResponse) == 0 {
 		return nil, fmt.Errorf("location not found: %s", location)
 	}
-	
+
 	// Parse lat/lon from strings
 	lat, err := strconv.ParseFloat(geoResponse[0].Lat, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid latitude: %v", err)
 	}
-	
+
 	lon, err := strconv.ParseFloat(geoResponse[0].Lon, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid longitude: %v", err)
 	}
-	
+
 	return &Location{
 		Name:    geoResponse[0].Name,
 		Lat:     lat,
@@ -193,28 +203,28 @@ func geocodeLocation(location string) (*Location, error) {
 func fetchOpenMeteoWeather(lat, lon float64) (*OpenMeteoResponse, error) {
 	// OpenMeteo API URL with current weather
 	apiURL := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%.6f&longitude=%.6f&current=temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,weather_code&timezone=auto", lat, lon)
-	
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch weather data: %v", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("weather API request failed with status: %d", resp.StatusCode)
 	}
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read weather response: %v", err)
 	}
-	
+
 	var weatherResponse OpenMeteoResponse
 	if err := json.Unmarshal(body, &weatherResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse weather response: %v", err)
 	}
-	
+
 	return &weatherResponse, nil
 }
 
@@ -263,50 +273,73 @@ func getWindDirection(degrees int) string {
 	return directions[index%16]
 }
 
-
 // weatherCmd represents the weather command
 var weatherCmd = &cobra.Command{
 	Use:   "weather [location]",
 	Short: "Get weather information with emoji-filled responses",
-	Long: `Get current weather information for a location using Foundation Models.
-The weather tool uses OpenMeteo API (free, no API key required) and OpenStreetMap 
-geocoding to fetch real weather data. The model will respond with a cute, 
-emoji-filled description of the weather conditions.
-
-⚠️  Note: Tool calling is currently not working reliably with Foundation Models.
-This is a beta feature under active development.`,
-	Example: `  # Get weather for cities (Note: may not work reliably)
+	Long: `Get current weather information for any location using Foundation Models.
+Provides real-time weather data including temperature, conditions, humidity, and wind.
+The assistant will respond with friendly, informative weather descriptions.`,
+	Example: `  # Get weather for cities
   found tool weather "New York, NY"
   found tool weather "London, UK"
   found tool weather "Tokyo, Japan"
   found tool weather "Paris, France"
 
-  # Various location formats (Note: may not work reliably)
+  # Various location formats
   found tool weather "San Francisco"
   found tool weather "Berlin, Germany"
-  found tool weather "Sydney, Australia"`,
+  found tool weather "Sydney, Australia"
+  
+  # Test Go tool directly (bypass Foundation Models)
+  found tool weather --direct "New York"`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		location := args[0]
+		
+		// Check if --direct flag is set to bypass Foundation Models
+		directMode, _ := cmd.Flags().GetBool("direct")
+		
+		if directMode {
+			fmt.Printf("🔧 Direct Mode: Testing Go WeatherTool directly\n")
+			fmt.Printf("Location: %s\n", location)
+			fmt.Print("Fetching weather data directly from Go tool...")
+			
+			// Create weather tool and execute directly
+			weather := &WeatherTool{}
+			args := map[string]any{
+				"location": location,
+			}
+			
+			result, err := weather.Execute(args)
+			if err != nil {
+				fmt.Printf("\n❌ Error executing weather tool: %v\n", err)
+				return
+			}
+			
+			if result.Error != "" {
+				fmt.Printf("\n❌ Weather tool returned error: %s\n", result.Error)
+				return
+			}
+			
+			fmt.Print("\r" + strings.Repeat(" ", 50) + "\r") // Clear loading message
+			fmt.Println("\n" + strings.Repeat("=", 60))
+			fmt.Println("📊 DIRECT GO TOOL RESULT:")
+			fmt.Println(strings.Repeat("-", 60))
+			fmt.Println(result.Content)
+			fmt.Println(strings.Repeat("=", 60))
+			fmt.Printf("\n✅ Go WeatherTool executed successfully!\n")
+			return
+		}
 
-		// Check model availability
+		// Check model availability for normal mode
 		availability := fm.CheckModelAvailability()
 		if availability != fm.ModelAvailable {
 			log.Fatalf("Foundation Models not available on this device (status: %d)", availability)
 		}
 
-		// Create session with weather-focused instructions
-		instructions := `You are a cheerful weather assistant with access to a weather tool. 
-
-IMPORTANT: You MUST use the weather tool to get current weather data. Do not guess or make up weather information.
-
-When a user asks about weather:
-1. ALWAYS call the weather tool with the location parameter
-2. Wait for the real weather data from the tool
-3. Only respond after you receive actual data from the weather tool
-4. Use the real data to provide a cute, emoji-filled description
-
-Never provide weather information without first calling the weather tool. If the tool fails, say so explicitly.`
+		// Create session with weather-focused instructions following Apple's best practices
+		instructions := `You are a helpful assistant. When users ask about weather conditions, use your available tools to provide current information.`
 
 		sess := fm.NewSessionWithInstructions(instructions)
 		if sess == nil {
@@ -325,7 +358,7 @@ Never provide weather information without first calling the weather tool. If the
 		fmt.Print("Fetching weather data...")
 
 		// Create prompt for weather query
-		prompt := fmt.Sprintf("I need you to call the weather tool right now to get current weather data for '%s'. Call the weather tool with location parameter set to '%s'.", location, location)
+		prompt := fmt.Sprintf("What's the weather like in %s?", location)
 
 		// Get response using tools
 		response := sess.RespondWithTools(prompt)
@@ -342,5 +375,7 @@ Never provide weather information without first calling the weather tool. If the
 }
 
 func init() {
+	// Add the --direct flag to bypass Foundation Models and test Go tool directly
+	weatherCmd.Flags().Bool("direct", false, "Execute Go WeatherTool directly without Foundation Models")
 	toolCmd.AddCommand(weatherCmd)
 }

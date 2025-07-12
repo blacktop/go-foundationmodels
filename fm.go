@@ -49,7 +49,8 @@ var (
 	setToolCallback               uintptr
 
 	// System functions for memory management
-	libcFree uintptr
+	libcFree   uintptr
+	libcMalloc uintptr
 
 	// Global tool registry
 	toolRegistry = make(map[string]Tool)
@@ -155,6 +156,11 @@ func initializeShim() error {
 		return fmt.Errorf("failed to load free function: %v", err)
 	}
 
+	libcMalloc, err = purego.Dlsym(libcHandle, "malloc")
+	if err != nil {
+		return fmt.Errorf("failed to load malloc function: %v", err)
+	}
+
 	// Set up the tool callback
 	setupToolCallback()
 
@@ -187,6 +193,13 @@ type ValidatedTool interface {
 	Tool
 	// ValidateArguments validates the tool arguments before execution
 	ValidateArguments(arguments map[string]any) error
+}
+
+// SchematizedTool extends Tool with parameter schema definition capabilities
+type SchematizedTool interface {
+	Tool
+	// GetParameters returns the parameter definitions for this tool
+	GetParameters() []ToolArgument
 }
 
 // ToolArgument represents a tool argument definition for validation
@@ -276,10 +289,19 @@ func WithBalanced() *GenerationOptions {
 	}
 }
 
+// ParameterDefinition represents a tool parameter definition
+type ParameterDefinition struct {
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	Required    bool     `json:"required"`
+	Enum        []string `json:"enum,omitempty"`
+}
+
 // ToolDefinition represents a tool definition for the Swift shim
 type ToolDefinition struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string                          `json:"name"`
+	Description string                          `json:"description"`
+	Parameters  map[string]ParameterDefinition  `json:"parameters"`
 }
 
 // Session represents a LanguageModelSession with context tracking
@@ -460,6 +482,27 @@ func (s *Session) RegisterTool(tool Tool) error {
 	toolDef := ToolDefinition{
 		Name:        tool.Name(),
 		Description: tool.Description(),
+		Parameters:  make(map[string]ParameterDefinition),
+	}
+	
+	// Extract parameter definitions if the tool supports them
+	if schematizedTool, ok := tool.(SchematizedTool); ok {
+		for _, arg := range schematizedTool.GetParameters() {
+			var enumValues []string
+			if arg.Enum != nil {
+				enumValues = make([]string, len(arg.Enum))
+				for i, v := range arg.Enum {
+					enumValues[i] = fmt.Sprintf("%v", v)
+				}
+			}
+			
+			toolDef.Parameters[arg.Name] = ParameterDefinition{
+				Type:        arg.Type,
+				Description: arg.Description,
+				Required:    arg.Required,
+				Enum:        enumValues,
+			}
+		}
 	}
 
 	toolDefJSON, err := json.Marshal(toolDef)
@@ -518,8 +561,11 @@ var toolCallbackFunc func(cToolName, cArgsJSON unsafe.Pointer) unsafe.Pointer
 
 // setupToolCallback sets up the callback mechanism for Swift to call Go tools
 func setupToolCallback() {
+	fmt.Println("Go: Setting up tool callback...")
+	
 	// Create a function pointer that Swift can call
 	toolCallbackFunc = func(cToolName, cArgsJSON unsafe.Pointer) unsafe.Pointer {
+		fmt.Println("Go: Tool callback invoked!")
 		toolName := goString(cToolName)
 		argsJSON := goString(cArgsJSON)
 
@@ -530,6 +576,8 @@ func setupToolCallback() {
 	// Register the callback with the Swift shim using purego.NewCallback
 	callback := purego.NewCallback(toolCallbackFunc)
 	purego.SyscallN(setToolCallback, callback)
+	
+	fmt.Println("Go: Tool callback setup completed")
 }
 
 // findOrExtractShimLibrary finds existing shim library or extracts embedded one
@@ -577,51 +625,83 @@ func extractEmbeddedShimLibrary() string {
 // executeTool executes a tool by name with the given arguments
 // This is called by the Swift shim via a callback
 func executeTool(toolName string, argsJSON string) string {
+	fmt.Printf("Go: executeTool called with toolName='%s', argsJSON='%s'\n", toolName, argsJSON)
+	
 	tool, exists := toolRegistry[toolName]
 	if !exists {
+		fmt.Printf("Go: Tool '%s' not found in registry\n", toolName)
 		result := ToolResult{
 			Error: fmt.Sprintf("tool '%s' not found", toolName),
 		}
 		resultJSON, _ := json.Marshal(result)
 		return string(resultJSON)
 	}
+	
+	fmt.Printf("Go: Found tool '%s', executing...\n", toolName)
 
 	// Parse arguments
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		fmt.Printf("Go: Failed to parse JSON: %v\n", err)
 		result := ToolResult{
 			Error: fmt.Sprintf("failed to parse arguments: %v", err),
 		}
 		resultJSON, _ := json.Marshal(result)
 		return string(resultJSON)
 	}
+	
+	fmt.Printf("Go: Parsed arguments: %+v\n", args)
 
 	// Validate arguments if the tool supports validation
 	if validatedTool, ok := tool.(ValidatedTool); ok {
+		fmt.Printf("Go: Validating arguments for tool '%s'\n", toolName)
 		if err := validatedTool.ValidateArguments(args); err != nil {
+			fmt.Printf("Go: Validation failed: %v\n", err)
 			result := ToolResult{
 				Error: fmt.Sprintf("validation failed: %v", err),
 			}
 			resultJSON, _ := json.Marshal(result)
 			return string(resultJSON)
 		}
+		fmt.Printf("Go: Validation passed\n")
 	}
 
 	// Execute the tool
+	fmt.Printf("Go: About to execute tool with args: %+v\n", args)
 	toolResult, err := tool.Execute(args)
 	if err != nil {
+		fmt.Printf("Go: Tool execution error: %v\n", err)
 		toolResult.Error = err.Error()
 	}
+	
+	fmt.Printf("Go: Tool execution completed, result: %+v\n", toolResult)
 
 	// Return result as JSON
 	resultJSON, _ := json.Marshal(toolResult)
+	fmt.Printf("Go: Returning JSON result: %s\n", string(resultJSON))
 	return string(resultJSON)
 }
 
-// cString creates a null-terminated C string from a Go string
+// cString creates a null-terminated C string from a Go string using malloc
 func cString(str string) unsafe.Pointer {
-	strBytes := append([]byte(str), 0)
-	return unsafe.Pointer(&strBytes[0])
+	strBytes := []byte(str)
+	length := len(strBytes) + 1 // +1 for null terminator
+	
+	// Allocate C memory
+	ptr, _, _ := purego.SyscallN(libcMalloc, uintptr(length))
+	if ptr == 0 {
+		return nil
+	}
+	
+	// Copy string data to C memory
+	for i, b := range strBytes {
+		*(*byte)(unsafe.Pointer(ptr + uintptr(i))) = b
+	}
+	
+	// Add null terminator
+	*(*byte)(unsafe.Pointer(ptr + uintptr(len(strBytes)))) = 0
+	
+	return unsafe.Pointer(ptr)
 }
 
 // goString converts a C string to a Go string
