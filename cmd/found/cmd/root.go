@@ -32,7 +32,8 @@ import (
 func init() {
 	log.SetHandler(clihander.Default)
 
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.found.yaml)")
+	// Add global flags that all subcommands can inherit
+	rootCmd.PersistentFlags().Bool("logs", false, "Show Swift debugging logs")
 
 	// Settings
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true

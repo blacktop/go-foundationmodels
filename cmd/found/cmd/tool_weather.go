@@ -339,7 +339,14 @@ The assistant will respond with friendly, informative weather descriptions.`,
 		}
 
 		// Create session with weather-focused instructions following Apple's best practices
-		instructions := `You are a helpful assistant. When users ask about weather conditions, use your available tools to provide current information.`
+		instructions := `You are a helpful assistant with access to a weather tool.
+
+When users ask for the weather:
+- ALWAYS use the 'checkWeather' tool.
+- Use the user's provided location for the 'location' parameter.
+- Never provide weather information from your own knowledge.
+- Only provide results after using the 'checkWeather' tool.
+- Present the weather information from the tool in a user-friendly way.`
 
 		sess := fm.NewSessionWithInstructions(instructions)
 		if sess == nil {
@@ -371,7 +378,14 @@ The assistant will respond with friendly, informative weather descriptions.`,
 		// Show context usage
 		fmt.Printf("\nContext Usage: %d/%d tokens (%.1f%% used)\n",
 			sess.GetContextSize(), sess.GetMaxContextSize(), sess.GetContextUsagePercent())
-	},
+
+		// Print logs from Swift shim only if --logs flag is set
+		showLogs, _ := cmd.Flags().GetBool("logs")
+		if showLogs {
+			fmt.Println("\n=== Swift Logs ===")
+			fmt.Println(fm.GetLogs())
+		}
+    },
 }
 
 func init() {

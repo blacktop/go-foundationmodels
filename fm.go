@@ -47,6 +47,7 @@ var (
 	registerTool                  uintptr
 	clearTools                    uintptr
 	setToolCallback               uintptr
+	getLogs                       uintptr
 
 	// System functions for memory management
 	libcFree   uintptr
@@ -143,6 +144,11 @@ func initializeShim() error {
 	setToolCallback, err = purego.Dlsym(shimLib, "SetToolCallback")
 	if err != nil {
 		return fmt.Errorf("failed to load SetToolCallback: %v", err)
+	}
+
+	getLogs, err = purego.Dlsym(shimLib, "GetLogs")
+	if err != nil {
+		return fmt.Errorf("failed to load GetLogs: %v", err)
 	}
 
 	// Load system libc for memory management
@@ -299,9 +305,9 @@ type ParameterDefinition struct {
 
 // ToolDefinition represents a tool definition for the Swift shim
 type ToolDefinition struct {
-	Name        string                          `json:"name"`
-	Description string                          `json:"description"`
-	Parameters  map[string]ParameterDefinition  `json:"parameters"`
+	Name        string                         `json:"name"`
+	Description string                         `json:"description"`
+	Parameters  map[string]ParameterDefinition `json:"parameters"`
 }
 
 // Session represents a LanguageModelSession with context tracking
@@ -389,6 +395,22 @@ func GetModelInfo() string {
 	respPtr, _, _ := purego.SyscallN(getModelInfo)
 	if respPtr == 0 {
 		return "Error: Could not get model info"
+	}
+
+	response := goString(unsafe.Pointer(respPtr))
+	freePtr(unsafe.Pointer(respPtr))
+	return response
+}
+
+// GetLogs returns accumulated logs from the Swift shim and clears them
+func GetLogs() string {
+	if !shimInitialized {
+		return fmt.Sprintf("Foundation Models shim not initialized: %v", shimInitError)
+	}
+
+	respPtr, _, _ := purego.SyscallN(getLogs)
+	if respPtr == 0 {
+		return "No logs available"
 	}
 
 	response := goString(unsafe.Pointer(respPtr))
@@ -484,7 +506,7 @@ func (s *Session) RegisterTool(tool Tool) error {
 		Description: tool.Description(),
 		Parameters:  make(map[string]ParameterDefinition),
 	}
-	
+
 	// Extract parameter definitions if the tool supports them
 	if schematizedTool, ok := tool.(SchematizedTool); ok {
 		for _, arg := range schematizedTool.GetParameters() {
@@ -495,7 +517,7 @@ func (s *Session) RegisterTool(tool Tool) error {
 					enumValues[i] = fmt.Sprintf("%v", v)
 				}
 			}
-			
+
 			toolDef.Parameters[arg.Name] = ParameterDefinition{
 				Type:        arg.Type,
 				Description: arg.Description,
@@ -561,11 +583,8 @@ var toolCallbackFunc func(cToolName, cArgsJSON unsafe.Pointer) unsafe.Pointer
 
 // setupToolCallback sets up the callback mechanism for Swift to call Go tools
 func setupToolCallback() {
-	fmt.Println("Go: Setting up tool callback...")
-	
 	// Create a function pointer that Swift can call
 	toolCallbackFunc = func(cToolName, cArgsJSON unsafe.Pointer) unsafe.Pointer {
-		fmt.Println("Go: Tool callback invoked!")
 		toolName := goString(cToolName)
 		argsJSON := goString(cArgsJSON)
 
@@ -576,8 +595,6 @@ func setupToolCallback() {
 	// Register the callback with the Swift shim using purego.NewCallback
 	callback := purego.NewCallback(toolCallbackFunc)
 	purego.SyscallN(setToolCallback, callback)
-	
-	fmt.Println("Go: Tool callback setup completed")
 }
 
 // findOrExtractShimLibrary finds existing shim library or extracts embedded one
@@ -625,60 +642,44 @@ func extractEmbeddedShimLibrary() string {
 // executeTool executes a tool by name with the given arguments
 // This is called by the Swift shim via a callback
 func executeTool(toolName string, argsJSON string) string {
-	fmt.Printf("Go: executeTool called with toolName='%s', argsJSON='%s'\n", toolName, argsJSON)
-	
 	tool, exists := toolRegistry[toolName]
 	if !exists {
-		fmt.Printf("Go: Tool '%s' not found in registry\n", toolName)
 		result := ToolResult{
 			Error: fmt.Sprintf("tool '%s' not found", toolName),
 		}
 		resultJSON, _ := json.Marshal(result)
 		return string(resultJSON)
 	}
-	
-	fmt.Printf("Go: Found tool '%s', executing...\n", toolName)
 
-	// Parse arguments
+	// Parse arguments from JSON
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		fmt.Printf("Go: Failed to parse JSON: %v\n", err)
 		result := ToolResult{
 			Error: fmt.Sprintf("failed to parse arguments: %v", err),
 		}
 		resultJSON, _ := json.Marshal(result)
 		return string(resultJSON)
 	}
-	
-	fmt.Printf("Go: Parsed arguments: %+v\n", args)
 
 	// Validate arguments if the tool supports validation
 	if validatedTool, ok := tool.(ValidatedTool); ok {
-		fmt.Printf("Go: Validating arguments for tool '%s'\n", toolName)
 		if err := validatedTool.ValidateArguments(args); err != nil {
-			fmt.Printf("Go: Validation failed: %v\n", err)
 			result := ToolResult{
 				Error: fmt.Sprintf("validation failed: %v", err),
 			}
 			resultJSON, _ := json.Marshal(result)
 			return string(resultJSON)
 		}
-		fmt.Printf("Go: Validation passed\n")
 	}
 
 	// Execute the tool
-	fmt.Printf("Go: About to execute tool with args: %+v\n", args)
 	toolResult, err := tool.Execute(args)
 	if err != nil {
-		fmt.Printf("Go: Tool execution error: %v\n", err)
 		toolResult.Error = err.Error()
 	}
-	
-	fmt.Printf("Go: Tool execution completed, result: %+v\n", toolResult)
 
 	// Return result as JSON
 	resultJSON, _ := json.Marshal(toolResult)
-	fmt.Printf("Go: Returning JSON result: %s\n", string(resultJSON))
 	return string(resultJSON)
 }
 
@@ -686,21 +687,21 @@ func executeTool(toolName string, argsJSON string) string {
 func cString(str string) unsafe.Pointer {
 	strBytes := []byte(str)
 	length := len(strBytes) + 1 // +1 for null terminator
-	
+
 	// Allocate C memory
 	ptr, _, _ := purego.SyscallN(libcMalloc, uintptr(length))
 	if ptr == 0 {
 		return nil
 	}
-	
+
 	// Copy string data to C memory
 	for i, b := range strBytes {
 		*(*byte)(unsafe.Pointer(ptr + uintptr(i))) = b
 	}
-	
+
 	// Add null terminator
 	*(*byte)(unsafe.Pointer(ptr + uintptr(len(strBytes)))) = 0
-	
+
 	return unsafe.Pointer(ptr)
 }
 

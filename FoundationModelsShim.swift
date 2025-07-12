@@ -46,7 +46,21 @@ public class SessionWrapper {
   }
 }
 
+private var logs: [String] = []
+
+private func log(_ message: String) {
+    logs.append(message)
+}
+
+@_cdecl("GetLogs")
+public func GetLogs() -> UnsafeMutablePointer<CChar> {
+    let logString = logs.joined(separator: "\n")
+    logs.removeAll()
+    return strdup(logString)
+}
+
 @_cdecl("CreateSession")
+
 public func CreateSession() -> UnsafeMutableRawPointer {
   let wrapper = SessionWrapper(instructions: nil)
   return Unmanaged.passRetained(wrapper).toOpaque()
@@ -177,6 +191,7 @@ public struct ParameterDefinition: Codable, Sendable {
   }
 }
 
+
 // Global storage for dynamic tools
 private var registeredTools: [String: DynamicTool] = [:]
 
@@ -184,96 +199,44 @@ private var registeredTools: [String: DynamicTool] = [:]
 public final class DynamicTool: Tool {
   public let name: String
   public let description: String
-  private let parameters: [String: ParameterDefinition]
+  public let parameters: GenerationSchema
   
-  init(name: String, description: String, parameters: [String: ParameterDefinition]) {
+  // The Arguments type must conform to 'Generable' for the Tool protocol.
+  // We can define a struct that can hold the expected arguments.
+  @Generable
+  public struct Arguments {
+    @Guide(description: "The arguments for the tool, in JSON format")
+    public var arguments: String
+  }
+
+  init(name: String, description: String, parameters: GenerationSchema) {
     self.name = name
     self.description = description
     self.parameters = parameters
   }
-  
-  @Generable
-  public struct Arguments {
-    // Universal parameters that can be used for any tool
-    @Guide(description: "Primary string parameter for text, names, locations, or operations")
-    let text1: String?
-    
-    @Guide(description: "Secondary string parameter for additional text input")
-    let text2: String?
-    
-    @Guide(description: "Primary numeric parameter")
-    let number1: Double?
-    
-    @Guide(description: "Secondary numeric parameter")
-    let number2: Double?
-    
-    @Guide(description: "Boolean parameter for true/false options")
-    let flag: Bool?
-    
-    @Guide(description: "Additional string parameter for complex tools")
-    let extra: String?
-  }
-  
+
   public func call(arguments: Arguments) async throws -> ToolOutput {
-    print("Swift: DynamicTool.call invoked for tool '\(name)'")
-    print("Swift: Raw arguments: text1=\(arguments.text1 ?? "nil"), text2=\(arguments.text2 ?? "nil"), number1=\(arguments.number1?.description ?? "nil"), number2=\(arguments.number2?.description ?? "nil")")
+    log("Swift: DynamicTool.call invoked for tool '\(name)'")
+    log("Swift: Raw arguments JSON: \(arguments.arguments)")
+
+    // The arguments are already in JSON format, so we can pass them directly to Go.
+    let argsJSON = arguments.arguments
     
-    // Map generic arguments to tool-specific parameter names based on parameter definitions
-    var mappedArgs: [String: Any] = [:]
-    let availableValues: [String: Any] = [
-      "string": [arguments.text1, arguments.text2, arguments.extra].compactMap { $0 },
-      "number": [arguments.number1, arguments.number2].compactMap { $0 },
-      "boolean": [arguments.flag].compactMap { $0 }
-    ]
-    
-    // Map parameters based on type and order
-    var stringIndex = 0
-    var numberIndex = 0
-    var boolIndex = 0
-    
-    for (paramName, paramDef) in parameters {
-      switch paramDef.type {
-      case "string", "text":
-        if let stringValues = availableValues["string"] as? [String], stringIndex < stringValues.count {
-          mappedArgs[paramName] = stringValues[stringIndex]
-          stringIndex += 1
-        }
-      case "number", "double", "float", "integer", "int":
-        if let numberValues = availableValues["number"] as? [Double], numberIndex < numberValues.count {
-          mappedArgs[paramName] = numberValues[numberIndex]
-          numberIndex += 1
-        }
-      case "boolean", "bool":
-        if let boolValues = availableValues["boolean"] as? [Bool], boolIndex < boolValues.count {
-          mappedArgs[paramName] = boolValues[boolIndex]
-          boolIndex += 1
-        }
-      default:
-        // Default to first available string value
-        if let stringValues = availableValues["string"] as? [String], !stringValues.isEmpty {
-          mappedArgs[paramName] = stringValues[0]
-        }
-      }
-    }
-    
-    let jsonData = try JSONSerialization.data(withJSONObject: mappedArgs)
-    let argsJSON = String(data: jsonData, encoding: .utf8) ?? "{}"
-    
-    print("Swift: Mapped arguments to: \(mappedArgs)")
-    print("Swift: Calling Go callback with JSON: \(argsJSON)")
-    
+    log("Swift: Calling Go callback with JSON: \(argsJSON)")
+
     // Call back to Go to execute the tool
     let result = executeGoTool(name, argsJSON)
-    
-    print("Swift: Tool execution result: \(result)")
-    
+
+    log("Swift: Tool execution result: \(result)")
+
     // Create tool output and return to Foundation Models
     let toolOutput = ToolOutput(result)
-    print("Swift: Created ToolOutput, returning to Foundation Models")
-    
+    log("Swift: Created ToolOutput, returning to Foundation Models")
+
     return toolOutput
   }
 }
+
 
 // Function pointer for calling back to Go
 private var goToolCallback: (@convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>)?
@@ -317,8 +280,25 @@ public func RegisterTool(
   do {
     let toolDef = try JSONDecoder().decode(ToolDefinition.self, from: toolDefJSON.data(using: .utf8)!)
     
-    // Create dynamic tool with parameter definitions
-    let dynamicTool = DynamicTool(name: toolDef.name, description: toolDef.description, parameters: toolDef.parameters)
+    // Create a DynamicGenerationSchema for the root.
+    let argumentsSchema = DynamicGenerationSchema(type: String.self)
+    let argumentsProperty = DynamicGenerationSchema.Property(
+        name: "arguments",
+        description: "A JSON string containing the tool arguments.",
+        schema: argumentsSchema
+    )
+
+    // Create a DynamicGenerationSchema for the root, passing the properties array directly
+    let rootSchema = DynamicGenerationSchema(
+        name: toolDef.name,
+        properties: [argumentsProperty]
+    )
+
+    // Create a GenerationSchema from the tool definition.
+    let schema = try GenerationSchema(root: rootSchema, dependencies: [])
+
+    // Create dynamic tool with the new schema.
+    let dynamicTool = DynamicTool(name: toolDef.name, description: toolDef.description, parameters: schema)
     
     // Store in global registry
     registeredTools[toolDef.name] = dynamicTool
@@ -329,12 +309,12 @@ public func RegisterTool(
     // Invalidate session so it gets recreated with new tools
     wrapper.invalidateSession()
     
-    print("Swift: Registered tool '\(toolDef.name)' with description '\(toolDef.description)'")
-    print("Swift: Total tools in session: \(wrapper.tools.count)")
+    log("Swift: Registered tool '\(toolDef.name)' with description '\(toolDef.description)'")
+    log("Swift: Total tools in session: \(wrapper.tools.count)")
     
     return 1 // Success
   } catch {
-    print("Failed to register tool: \(error)")
+    log("Failed to register tool: \(error)")
     return 0 // Failure
   }
 }
@@ -368,13 +348,13 @@ public func RespondWithTools(
 
   Task {
     do {
+      print("Swift: RespondWithTools called with prompt: \(prompt)")
       print("Swift: Using session with \(wrapper.tools.count) tools")
-      print("Swift: Sending prompt: \(prompt)")
       
       // The session property will automatically create the session with tools if needed
       let resp = try await wrapper.session.respond(to: prompt)
       out = resp.content
-      print("Swift: Received response: \(out)")
+      log("Swift: Received response: \(out)")
     } catch {
       out = "Error: \(error)"
     }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,35 +14,22 @@ import (
 // CalculatorTool implements basic arithmetic operations
 type CalculatorTool struct{}
 
-// Define argument definitions for validation
+// Define argument definitions for validation - match Foundation Models' parameter naming
 var calculatorArgDefs = []fm.ToolArgument{
 	{
-		Name:        "a",
-		Type:        "number",
-		Description: "First number",
-		Required:    true,
-	},
-	{
-		Name:        "b",
-		Type:        "number",
-		Description: "Second number",
-		Required:    true,
-	},
-	{
-		Name:        "operation",
+		Name:        "arguments",
 		Type:        "string",
-		Description: "Mathematical operation",
+		Description: "Mathematical expression with two numbers and one operation (add, subtract, multiply, divide)",
 		Required:    true,
-		Enum:        []any{"add", "subtract", "multiply", "divide", "+", "-", "*", "/"},
 	},
 }
 
 func (c *CalculatorTool) Name() string {
-	return "calculator"
+	return "calculate"
 }
 
 func (c *CalculatorTool) Description() string {
-	return "Performs mathematical calculations"
+	return "Calculate mathematical expressions with add, subtract, multiply, or divide operations"
 }
 
 // ValidateArguments validates the calculator tool arguments
@@ -55,64 +43,115 @@ func (c *CalculatorTool) GetParameters() []fm.ToolArgument {
 }
 
 func (c *CalculatorTool) Execute(args map[string]any) (fm.ToolResult, error) {
-	// Extract arguments
-	aVal, aExists := args["a"]
-	bVal, bExists := args["b"]
-	opVal, opExists := args["operation"]
-	
-	if !aExists || !bExists || !opExists {
+	// Extract arguments parameter (matching Foundation Models' naming)
+	argsVal, exists := args["arguments"]
+	if !exists {
 		return fm.ToolResult{
-			Error: "Missing required arguments: a, b, operation",
+			Error: "Missing required argument: arguments",
 		}, nil
 	}
-	
-	// Convert to numbers
-	a, err := convertToFloat(aVal)
-	if err != nil {
-		return fm.ToolResult{
-			Error: fmt.Sprintf("Invalid argument 'a': %v", err),
-		}, nil
-	}
-	
-	b, err := convertToFloat(bVal)
-	if err != nil {
-		return fm.ToolResult{
-			Error: fmt.Sprintf("Invalid argument 'b': %v", err),
-		}, nil
-	}
-	
-	operation, ok := opVal.(string)
+
+	expression, ok := argsVal.(string)
 	if !ok {
 		return fm.ToolResult{
-			Error: "Operation must be a string",
+			Error: "Arguments must be a string",
 		}, nil
 	}
-	
-	// Perform calculation
-	var result float64
-	switch strings.ToLower(operation) {
-	case "add", "+":
-		result = a + b
-	case "subtract", "-":
-		result = a - b
-	case "multiply", "*":
-		result = a * b
-	case "divide", "/":
-		if b == 0 {
-			return fm.ToolResult{
-				Error: "Division by zero",
-			}, nil
+
+	// Parse and evaluate the mathematical expression
+	result, err := evaluateExpression(expression)
+	if err != nil {
+		// Check for unsupported operations
+		if strings.Contains(err.Error(), "invalid expression format") {
+			if containsUnsupportedOperation(expression) {
+				return fm.ToolResult{
+					Error: "Unsupported operation. Supported operations are: add (+), subtract (-), multiply (*), and divide (/)",
+				}, nil
+			}
 		}
-		result = a / b
-	default:
 		return fm.ToolResult{
-			Error: fmt.Sprintf("Unknown operation: %s (use add, subtract, multiply, divide)", operation),
+			Error: fmt.Sprintf("Error evaluating expression '%s': %v", expression, err),
 		}, nil
 	}
-	
+
 	return fm.ToolResult{
 		Content: fmt.Sprintf("%.2f", result),
 	}, nil
+}
+
+// containsUnsupportedOperation checks if the expression contains unsupported operations
+func containsUnsupportedOperation(expr string) bool {
+	expr = strings.ToLower(expr)
+	unsupportedOps := []string{
+		"sqrt", "square root", "root", "power", "^", "**", 
+		"sin", "cos", "tan", "log", "ln", "exp", "abs",
+		"mod", "%", "factorial", "!", "pi", "e",
+	}
+	
+	for _, op := range unsupportedOps {
+		if strings.Contains(expr, op) {
+			return true
+		}
+	}
+	return false
+}
+
+// evaluateExpression parses and evaluates a simple mathematical expression
+func evaluateExpression(expr string) (float64, error) {
+	// Clean up the expression
+	expr = strings.ReplaceAll(expr, " ", "")
+	expr = strings.ToLower(expr)
+	
+	// Handle common word replacements
+	expr = strings.ReplaceAll(expr, "plus", "+")
+	expr = strings.ReplaceAll(expr, "add", "+")
+	expr = strings.ReplaceAll(expr, "minus", "-")
+	expr = strings.ReplaceAll(expr, "subtract", "-")
+	expr = strings.ReplaceAll(expr, "times", "*")
+	expr = strings.ReplaceAll(expr, "multiply", "*")
+	expr = strings.ReplaceAll(expr, "multipliedby", "*")
+	expr = strings.ReplaceAll(expr, "dividedby", "/")
+	expr = strings.ReplaceAll(expr, "divide", "/")
+	expr = strings.ReplaceAll(expr, "×", "*")
+	expr = strings.ReplaceAll(expr, "÷", "/")
+	
+	// Simple expression parser for basic operations
+	// Handle patterns like "5+3", "144/12", "25*8", "100-25"
+	re := regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*([+\-*/])\s*(\d+(?:\.\d+)?)$`)
+	matches := re.FindStringSubmatch(expr)
+	
+	if len(matches) != 4 {
+		return 0, fmt.Errorf("invalid expression format: %s", expr)
+	}
+	
+	a, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid first number: %s", matches[1])
+	}
+	
+	operation := matches[2]
+	
+	b, err := strconv.ParseFloat(matches[3], 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid second number: %s", matches[3])
+	}
+	
+	// Perform calculation
+	switch operation {
+	case "+":
+		return a + b, nil
+	case "-":
+		return a - b, nil
+	case "*":
+		return a * b, nil
+	case "/":
+		if b == 0 {
+			return 0, fmt.Errorf("division by zero")
+		}
+		return a / b, nil
+	default:
+		return 0, fmt.Errorf("unknown operation: %s", operation)
+	}
 }
 
 func convertToFloat(val any) (float64, error) {
@@ -157,15 +196,21 @@ This is a beta feature under active development.`,
 		}
 		
 		// Create session with calculator instructions
-		instructions := `You are a helpful assistant with access to a calculator function.
+		instructions := `You are a helpful assistant with access to a calculate function.
 
-When users ask math questions:
-- ALWAYS use the calculator function for arithmetic
-- Never calculate numbers yourself
-- Only provide results after using the calculator function
-- Show the calculation clearly
+The calculate function supports ONLY these operations:
+- Addition (add, plus, +)
+- Subtraction (subtract, minus, -)  
+- Multiplication (multiply, times, *)
+- Division (divide, /)
 
-You must use the calculator function for all mathematical operations.`
+When users ask mathematical questions:
+- ALWAYS use the calculate function with basic math expressions
+- Convert natural language to mathematical expressions (e.g., "2 plus 2" becomes "2 + 2")
+- For unsupported operations (square root, powers, etc.), explain what operations are supported
+- Never perform calculations yourself
+
+You must use the calculate function for all supported mathematical operations.`
 		sess := fm.NewSessionWithInstructions(instructions)
 		if sess == nil {
 			log.Fatal("Failed to create session")
@@ -191,6 +236,13 @@ You must use the calculator function for all mathematical operations.`
 		// Show context usage
 		fmt.Printf("\nContext Usage: %d/%d tokens (%.1f%% used)\n", 
 			sess.GetContextSize(), sess.GetMaxContextSize(), sess.GetContextUsagePercent())
+
+		// Print logs from Swift shim only if --logs flag is set
+		showLogs, _ := cmd.Flags().GetBool("logs")
+		if showLogs {
+			fmt.Println("\n=== Swift Logs ===")
+			fmt.Println(fm.GetLogs())
+		}
 	},
 }
 
