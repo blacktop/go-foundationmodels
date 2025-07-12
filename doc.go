@@ -8,7 +8,7 @@ providing privacy-focused AI capabilities without requiring internet connectivit
 
 • Text generation with LanguageModelSession
 • Generation options for temperature, max tokens, and other parameters
-• Dynamic tool calling with custom Go tools and input validation (⚠️ BETA - currently under development)
+• Dynamic tool calling with custom Go tools and input validation
 • Structured output generation with JSON formatting
 • Context window management (4096 token limit)
 • Context cancellation and timeout support
@@ -74,37 +74,32 @@ Foundation Models has a strict 4096 token context window. Monitor usage:
 		sess = newSess
 	}
 
-# Tool Calling (⚠️ BETA - Under Development)
-
-⚠️ WARNING: Tool calling is currently not working as expected with Apple's Foundation Models.
-While the API and validation infrastructure is complete, Foundation Models may not
-actually invoke tools even when registered. This is a beta feature under active development.
+# Tool Calling
 
 Define custom tools that the model can call:
 
 	type CalculatorTool struct{}
 
 	func (c *CalculatorTool) Name() string {
-		return "calculator"
+		return "calculate"
 	}
 
 	func (c *CalculatorTool) Description() string {
-		return "Performs basic arithmetic operations"
+		return "Calculate mathematical expressions with add, subtract, multiply, or divide operations"
+	}
+
+	// Implement SchematizedTool for parameter definitions
+	func (c *CalculatorTool) GetParameters() []fm.ToolArgument {
+		return []fm.ToolArgument{{
+			Name: "arguments", Type: "string", Required: true,
+			Description: "Mathematical expression with two numbers and one operation",
+		}}
 	}
 
 	func (c *CalculatorTool) Execute(args map[string]any) (fm.ToolResult, error) {
-		a := args["a"].(float64)
-		b := args["b"].(float64)
-		operation := args["operation"].(string)
-
-		var result float64
-		switch operation {
-		case "add":
-			result = a + b
-		case "multiply":
-			result = a * b
-		// ... other operations
-		}
+		expr := args["arguments"].(string)
+		// Parse and evaluate expression (implementation details omitted)
+		result := evaluateExpression(expr)
 
 		return fm.ToolResult{
 			Content: fmt.Sprintf("%.2f", result),
@@ -142,12 +137,15 @@ Add validation to your tools for better error handling:
 
 Register and use tools:
 
+	sess := fm.NewSessionWithInstructions("You are a helpful calculator assistant.")
+	defer sess.Release()
+
 	calculator := &CalculatorTool{}
 	sess.RegisterTool(calculator)
 
-	// Note: Tool calling may not work reliably in current Foundation Models beta
+	// Foundation Models will autonomously call the tool when needed
 	response := sess.RespondWithTools("What is 15 + 27?")
-	fmt.Println(response)
+	fmt.Println(response) // "The result is 42.00"
 
 # Structured Output
 
@@ -183,8 +181,8 @@ Cancel long-running requests with context support:
 		fmt.Printf("Request cancelled: %v\n", err)
 	}
 
-	// Tool calling with timeout (Note: may not work reliably in current beta)
-	response, err = sess.RespondWithToolsTimeout(10*time.Second, "Use calculator")
+	// Tool calling with timeout
+	response, err = sess.RespondWithToolsTimeout(10*time.Second, "What is 25 times 4?")
 	if err != nil {
 		fmt.Printf("Tool request timed out: %v\n", err)
 	}
@@ -272,10 +270,24 @@ No manual setup required - the package is fully self-contained!
 
 • Foundation Models API is still evolving
 • Some advanced GenerationOptions may not be fully supported yet
-• Tool calling is currently not working reliably (beta feature under development)
+• Foundation Models tool invocation can be inconsistent due to safety restrictions
 • Streaming support is limited
 • Context cancellation cannot interrupt actual model computation
 • macOS 26 Tahoe only
+
+# Tool Calling Status
+
+✅ **What Works:**
+• Tool registration and parameter definition
+• Swift ↔ Go callback mechanism
+• Real data fetching (weather, calculations, etc.)
+• Error handling and validation
+• Debug logging with --logs flag
+
+⚠️ **Foundation Models Behavior:**
+• Tool calling works but can be inconsistent
+• Some queries may be blocked by safety guardrails
+• Success rate varies by tool complexity and phrasing
 
 # License
 
