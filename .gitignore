@@ -27,6 +27,7 @@ go.work.sum
 dist/
 .DS_Store
 completions/
+OPC/
 
 # AI
 .claude

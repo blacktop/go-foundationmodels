@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.png" height="300">
-  <source media="(prefers-color-scheme: light)" srcset="docs/logo-light.png" height="300">
-  <img alt="Fallback logo" src="docs/logo-dark.png" height="300">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.webp" height="400">
+  <source media="(prefers-color-scheme: light)" srcset="docs/logo-light.webppng" height="400">
+  <img alt="Fallback logo" src="docs/logo-dark.webp" height="300">
 </picture>
 
   <h1 align="center">go-foundationmodels</h1>
@@ -26,9 +26,10 @@ Apple's [Foundation Models](https://developer.apple.com/documentation/foundation
 
 - **🔒 Privacy-focused**: All AI processing happens on-device, no data leaves your Mac
 - **⚡ High performance**: Optimized for Apple Silicon with no network latency
+- **🚀 Streaming-first**: Simulated real-time response streaming with typing indicators for modern UX
 - **🛠️ Rich tooling**: Advanced features like input validation, context cancellation, and generation control
 - **📦 Self-contained**: Embedded Swift shim library - no external dependencies
-- **🎯 Production-ready**: Comprehensive error handling, memory management, and validation
+- **🎯 Production-ready**: Comprehensive error handling, memory management, and structured logging
 
 ## Features
 
@@ -55,6 +56,10 @@ Apple's [Foundation Models](https://developer.apple.com/documentation/foundation
 - **Memory safety**: Automatic C string cleanup and proper resource management
 - **Error resilience**: Graceful initialization failure handling
 - **Self-contained**: Embedded Swift shim library with automatic extraction
+- **Structured logging**: Go slog integration with debug logging for both Go and Swift layers
+
+> [!WARNING]
+> I've noticed Apple's model is very finicky and is overly cautious and may refuse when answering any questions.
 
 ## Requirements
 
@@ -167,11 +172,10 @@ Use `found --help` or `found [command] --help` to see all available commands and
 
 **Available commands:**
 - `found info` - Display model availability and system information
-- `found quest` - Interactive chat with optional system instructions and JSON output
+- `found quest` - Interactive chat with streaming support, system instructions and JSON output
+- `found stream` - Real-time streaming text generation with optional tools ✅
 - `found tool calc` - Mathematical calculations with real arithmetic ✅
 - `found tool weather` - Real-time weather data with geocoding ✅
-- Use `--logs` flag with any tool command to see Swift debugging output
-- Use `--direct` flag with weather tool to test Go implementation directly
 
 ![demo](vhs.gif)
 
@@ -191,10 +195,10 @@ found tool calc "add 15 plus 27"
 # Returns: The result of "15 + 27" is **42.00**.
 ```
 
-**Debug Mode**: See Swift-Go callback mechanism in action
+**Debug Mode**: See comprehensive logging in action
 ```bash
-found tool weather --logs "Paris"
-# Shows detailed Swift logs of tool registration, execution, and results
+found tool weather --verbose "Paris"
+# Shows both Go debug logs (slog) and Swift logs with detailed execution flow
 ```
 
 ### Foundation Models Behavior
@@ -210,19 +214,22 @@ While tool calling is functional, Foundation Models exhibits some variability:
 - **Foundation Models Safety**: Some queries may be blocked by built-in safety guardrails
 - **Context Window**: 4096 token limit requires session refresh for long conversations
 - **Tool Parameter Mapping**: Complex expressions may not parse correctly into tool parameters
+- **Streaming Implementation**: Currently uses simulated streaming (post-processing chunks) as Foundation Models doesn't yet provide native streaming APIs
 
 ## Roadmap
 
 - [x] **Fix tool calling reliability** - ✅ **COMPLETED** - Tools now work with real data
 - [x] **Swift-Go callback mechanism** - ✅ **COMPLETED** - Reliable bidirectional communication
-- [x] **Tool debugging capabilities** - ✅ **COMPLETED** - `--logs` flag for detailed debugging
+- [x] **Tool debugging capabilities** - ✅ **COMPLETED** - `--verbose` flag for comprehensive debug logs
 - [x] **Direct tool testing** - ✅ **COMPLETED** - `--direct` flag bypasses Foundation Models
-- [ ] **Streaming responses** with async/await support
+- [x] **Streaming responses** - ✅ **COMPLETED** - Simulated streaming with word/sentence chunks (native streaming pending Foundation Models API)
+- [x] **Structured logging** - ✅ **COMPLETED** - Go slog integration with consolidated debug logging
 - [ ] **Advanced tool schemas** with OpenAPI-style definitions
 - [ ] **Multi-modal support** (images, audio) when available
 - [ ] **Performance optimizations** for large contexts
 - [ ] **Enhanced error handling** with detailed diagnostics
 - [ ] **Plugin system** for extensible tool management
+- [ ] **Native streaming support** - Upgrade to Foundation Models native streaming API when available
 - [ ] **Improve Foundation Models consistency** - Research better prompting strategies
 
 ## License

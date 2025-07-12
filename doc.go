@@ -6,15 +6,16 @@ providing privacy-focused AI capabilities without requiring internet connectivit
 
 # Features
 
-• Text generation with LanguageModelSession
-• Generation options for temperature, max tokens, and other parameters
+• Streaming-first text generation with LanguageModelSession
+• Simulated real-time response streaming with word/sentence chunks
 • Dynamic tool calling with custom Go tools and input validation
 • Structured output generation with JSON formatting
 • Context window management (4096 token limit)
 • Context cancellation and timeout support
 • Session lifecycle management with proper memory handling
 • System instructions support
-• Streaming responses (via Swift shim)
+• Generation options for temperature, max tokens, and other parameters
+• Structured logging with Go slog integration for comprehensive debugging
 
 # Requirements
 
@@ -187,6 +188,28 @@ Cancel long-running requests with context support:
 		fmt.Printf("Tool request timed out: %v\n", err)
 	}
 
+# Streaming Responses
+
+Generate responses with simulated real-time streaming output:
+
+	// Simple streaming (simulated - post-processes complete response into chunks)
+	callback := func(chunk string, isLast bool) {
+		fmt.Print(chunk)
+		if isLast {
+			fmt.Println() // Final newline
+		}
+	}
+	sess.RespondWithStreaming("Write a story", callback)
+
+	// Streaming with tools
+	sess.RespondWithToolsStreaming("What's the weather and calculate 2+2?", callback)
+
+	// Basic streaming
+	sess.RespondWithStreaming("Tell me a joke", callback)
+
+Note: Current streaming implementation is simulated (breaks complete response into chunks).
+Native streaming will be implemented when Foundation Models provides streaming APIs.
+
 # Model Availability
 
 Check if Foundation Models is available:
@@ -271,8 +294,8 @@ No manual setup required - the package is fully self-contained!
 • Foundation Models API is still evolving
 • Some advanced GenerationOptions may not be fully supported yet
 • Foundation Models tool invocation can be inconsistent due to safety restrictions
-• Streaming support is limited
 • Context cancellation cannot interrupt actual model computation
+• Streaming is currently simulated (post-processing) - native streaming pending Apple API support
 • macOS 26 Tahoe only
 
 # Tool Calling Status
@@ -282,12 +305,35 @@ No manual setup required - the package is fully self-contained!
 • Swift ↔ Go callback mechanism
 • Real data fetching (weather, calculations, etc.)
 • Error handling and validation
-• Debug logging with --logs flag
+• Structured logging with Go slog integration
 
 ⚠️ **Foundation Models Behavior:**
 • Tool calling works but can be inconsistent
 • Some queries may be blocked by safety guardrails
 • Success rate varies by tool complexity and phrasing
+
+# Debug Logging
+
+The package provides comprehensive debug logging through Go's slog package:
+
+	import "log/slog"
+
+	// Enable debug logging (typically done by CLI with --verbose flag)
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})
+	slog.SetDefault(slog.New(handler))
+
+	// All fm operations will now log detailed debug information
+	sess := fm.NewSession()
+	// Logs: session creation, tool registration, response processing, etc.
+
+Debug logs include:
+• Session creation and configuration details
+• Tool registration and parameter validation
+• Request/response processing with timing
+• Context usage and memory management
+• Swift shim layer interaction details
 
 # License
 

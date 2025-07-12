@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"log"
-	"strings"
 
 	fm "github.com/blacktop/go-foundationmodels"
 	"github.com/spf13/cobra"
@@ -13,6 +12,7 @@ var (
 	systemInstructions string
 	jsonOutput         bool
 	temperature        float32
+	streamOutput       bool
 )
 
 // questCmd represents the quest command
@@ -36,10 +36,18 @@ Supports system instructions and structured JSON output.`,
   # Control creativity with temperature
   found quest --temp 0.0 "What is 2+2?" # Deterministic
   found quest --temp 0.7 "Tell me about AI" # Balanced
-  found quest --temp 1.0 "Write a creative story" # Very creative`,
+  found quest --temp 1.0 "Write a creative story" # Very creative
+
+  # Real-time streaming output
+  found quest --stream "Write a short story about robots"
+  found quest --stream --json "Analyze this in JSON: 'Hello world'"`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		prompt := args[0]
+
+		// Setup slog based on verbose flag
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		SetupSlog(verbose)
 
 		// Check model availability
 		availability := fm.CheckModelAvailability()
@@ -77,23 +85,51 @@ Supports system instructions and structured JSON output.`,
 			}
 		}
 
+		// Create chat UI
+		chatUI := NewChatUI()
+
+		// Display user question
+		chatUI.PrintUserMessage(prompt)
+
 		// Generate response
-		var response string
-		if jsonOutput {
-			fmt.Println("Output Format: JSON")
-			response = sess.RespondWithStructuredOutput(prompt)
+		if streamOutput {
+			fmt.Println("Mode: Real-time streaming")
+
+			// Use streaming for real-time output
+			callback := func(chunk string, isLast bool) {
+				if chunk != "" {
+					fmt.Print(chunk)
+				}
+				if isLast {
+					fmt.Println() // Final newline
+				}
+			}
+
+			if jsonOutput {
+				sess.RespondWithStreaming(prompt+" (respond in structured JSON format)", callback)
+			} else {
+				sess.RespondWithStreaming(prompt, callback)
+			}
 		} else {
-			response = sess.Respond(prompt, options)
+			// Show typing indicator while waiting for response
+			chatUI.ShowTypingIndicator()
+
+			// Use traditional blocking response (which uses streaming internally)
+			var response string
+			if jsonOutput {
+				fmt.Println("Output Format: JSON")
+				response = sess.RespondWithStructuredOutput(prompt)
+			} else {
+				response = sess.Respond(prompt, options)
+			}
+
+			// Hide typing indicator and display assistant response
+			chatUI.HideTypingIndicator()
+			chatUI.PrintAssistantMessage(response)
 		}
 
-		// Display response
-		fmt.Println("\n" + strings.Repeat("=", 50))
-		fmt.Println(response)
-		fmt.Println(strings.Repeat("=", 50))
-
 		// Show final context usage
-		fmt.Printf("\nContext Usage: %d/%d tokens (%.1f%% used)\n",
-			sess.GetContextSize(), sess.GetMaxContextSize(), sess.GetContextUsagePercent())
+		chatUI.PrintContextUsage(sess.GetContextSize(), sess.GetMaxContextSize(), sess.GetContextUsagePercent())
 
 		if sess.IsContextNearLimit() {
 			fmt.Println("⚠️  Context is near the limit - consider shorter prompts")
@@ -108,4 +144,5 @@ func init() {
 	questCmd.Flags().StringVarP(&systemInstructions, "system", "s", "", "System instructions for the model")
 	questCmd.Flags().BoolVarP(&jsonOutput, "json", "j", false, "Output structured JSON response")
 	questCmd.Flags().Float32VarP(&temperature, "temp", "t", 0, "Temperature for generation (0.0=deterministic, 1.0=creative)")
+	questCmd.Flags().BoolVarP(&streamOutput, "stream", "", false, "Show real-time streaming output")
 }

@@ -47,7 +47,15 @@ Set Width 1200
 Set Height 800
 Set PlaybackSpeed 2
 
-Type "./found quest --system 'You are a hopeless romantic' 'Tell me a quick poem about AI'"
+Type "dist/found tool weather 'San Francisco, California'"
+
+Sleep 500ms
+
+Enter
+
+Sleep 10s
+
+Type "dist/found quest --system 'You are a hopeless romantic' 'Tell me a quick poem about AI'"
 
 Sleep 500ms
 

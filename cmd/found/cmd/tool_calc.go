@@ -83,11 +83,11 @@ func (c *CalculatorTool) Execute(args map[string]any) (fm.ToolResult, error) {
 func containsUnsupportedOperation(expr string) bool {
 	expr = strings.ToLower(expr)
 	unsupportedOps := []string{
-		"sqrt", "square root", "root", "power", "^", "**", 
+		"sqrt", "square root", "root", "power", "^", "**",
 		"sin", "cos", "tan", "log", "ln", "exp", "abs",
 		"mod", "%", "factorial", "!", "pi", "e",
 	}
-	
+
 	for _, op := range unsupportedOps {
 		if strings.Contains(expr, op) {
 			return true
@@ -101,7 +101,7 @@ func evaluateExpression(expr string) (float64, error) {
 	// Clean up the expression
 	expr = strings.ReplaceAll(expr, " ", "")
 	expr = strings.ToLower(expr)
-	
+
 	// Handle common word replacements
 	expr = strings.ReplaceAll(expr, "plus", "+")
 	expr = strings.ReplaceAll(expr, "add", "+")
@@ -114,28 +114,28 @@ func evaluateExpression(expr string) (float64, error) {
 	expr = strings.ReplaceAll(expr, "divide", "/")
 	expr = strings.ReplaceAll(expr, "×", "*")
 	expr = strings.ReplaceAll(expr, "÷", "/")
-	
+
 	// Simple expression parser for basic operations
 	// Handle patterns like "5+3", "144/12", "25*8", "100-25"
 	re := regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*([+\-*/])\s*(\d+(?:\.\d+)?)$`)
 	matches := re.FindStringSubmatch(expr)
-	
+
 	if len(matches) != 4 {
 		return 0, fmt.Errorf("invalid expression format: %s", expr)
 	}
-	
+
 	a, err := strconv.ParseFloat(matches[1], 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid first number: %s", matches[1])
 	}
-	
+
 	operation := matches[2]
-	
+
 	b, err := strconv.ParseFloat(matches[3], 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid second number: %s", matches[3])
 	}
-	
+
 	// Perform calculation
 	switch operation {
 	case "+":
@@ -154,6 +154,9 @@ func evaluateExpression(expr string) (float64, error) {
 	}
 }
 
+// convertToFloat is currently unused but kept for future use
+//
+//nolint:unused
 func convertToFloat(val any) (float64, error) {
 	switch v := val.(type) {
 	case float64:
@@ -188,19 +191,23 @@ This is a beta feature under active development.`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		question := args[0]
-		
+
+		// Setup slog based on verbose flag
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		SetupSlog(verbose)
+
 		// Check model availability
 		availability := fm.CheckModelAvailability()
 		if availability != fm.ModelAvailable {
 			log.Fatalf("Foundation Models not available on this device (status: %d)", availability)
 		}
-		
+
 		// Create session with calculator instructions
 		instructions := `You are a helpful assistant with access to a calculate function.
 
 The calculate function supports ONLY these operations:
 - Addition (add, plus, +)
-- Subtraction (subtract, minus, -)  
+- Subtraction (subtract, minus, -)
 - Multiplication (multiply, times, *)
 - Division (divide, /)
 
@@ -216,30 +223,34 @@ You must use the calculate function for all supported mathematical operations.`
 			log.Fatal("Failed to create session")
 		}
 		defer sess.Release()
-		
+
 		// Register calculator tool
 		calculator := &CalculatorTool{}
 		if err := sess.RegisterTool(calculator); err != nil {
 			log.Fatalf("Failed to register calculator tool: %v", err)
 		}
-		
-		fmt.Printf("🧮 Calculator Tool Ready\n")
-		fmt.Printf("Question: %s\n", question)
-		
+
+		// Create chat UI
+		chatUI := NewChatUI()
+
+		// Display user question
+		chatUI.PrintUserMessage(question)
+
+		// Show typing indicator while waiting for response
+		chatUI.ShowTypingIndicator()
+
 		// Get response using tools
 		response := sess.RespondWithTools(question)
-		
-		fmt.Println("\n" + strings.Repeat("=", 50))
-		fmt.Println(response)
-		fmt.Println(strings.Repeat("=", 50))
-		
-		// Show context usage
-		fmt.Printf("\nContext Usage: %d/%d tokens (%.1f%% used)\n", 
-			sess.GetContextSize(), sess.GetMaxContextSize(), sess.GetContextUsagePercent())
 
-		// Print logs from Swift shim only if --logs flag is set
-		showLogs, _ := cmd.Flags().GetBool("logs")
-		if showLogs {
+		// Hide typing indicator and display assistant response
+		chatUI.HideTypingIndicator()
+		chatUI.PrintAssistantMessage(response)
+
+		// Show context usage
+		chatUI.PrintContextUsage(sess.GetContextSize(), sess.GetMaxContextSize(), sess.GetContextUsagePercent())
+
+		// Print Swift logs if --verbose flag is set
+		if verbose {
 			fmt.Println("\n=== Swift Logs ===")
 			fmt.Println(fm.GetLogs())
 		}

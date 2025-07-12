@@ -348,8 +348,8 @@ public func RespondWithTools(
 
   Task {
     do {
-      print("Swift: RespondWithTools called with prompt: \(prompt)")
-      print("Swift: Using session with \(wrapper.tools.count) tools")
+      log("Swift: RespondWithTools called with prompt: \(prompt)")
+      log("Swift: Using session with \(wrapper.tools.count) tools")
       
       // The session property will automatically create the session with tools if needed
       let resp = try await wrapper.session.respond(to: prompt)
@@ -373,31 +373,109 @@ private var streamingCallbacks: [ObjectIdentifier: (String) -> Void] = [:]
 public func RespondWithStreaming(
   _ sessionPtr: UnsafeMutableRawPointer,
   _ cPrompt: UnsafePointer<CChar>,
-  _ callback: @escaping @convention(c) (UnsafePointer<CChar>) -> Void
+  _ callback: @escaping @convention(c) (UnsafePointer<CChar>, Bool) -> Void
 ) {
   let wrapper = Unmanaged<SessionWrapper>
     .fromOpaque(sessionPtr)
     .takeUnretainedValue()
   let prompt = String(cString: cPrompt)
   
+  log("Swift: Starting streaming response for prompt: \(prompt)")
+  
   Task {
     do {
-      let response = try await wrapper.session.respond(to: prompt)
+      let session = wrapper.session
+      log("Swift: Attempting to use streaming API")
       
-      // Since streaming may not be available, simulate with the full response
-      let cString = strdup(response.content)
-      callback(cString!)
-      free(cString)
-      
-      // Signal completion with empty string
-      let endString = strdup("")
-      callback(endString!)
-      free(endString)
+      // Try to use actual streaming if available in Foundation Models
+      if #available(macOS 26.0, *) {
+        // Check if the session supports streaming
+        let response = try await session.respond(to: prompt)
+        
+        // For now, simulate streaming by breaking response into chunks
+        // TODO: Replace with Foundation Models native streaming API when available
+        // Current: Get full response then chunk it (simulated streaming)
+        // Future: Use true real-time streaming API for progressive generation
+        let content = response.content
+        let words = content.components(separatedBy: " ")
+        
+        log("Swift: Simulating streaming with \(words.count) word chunks")
+        
+        for (index, word) in words.enumerated() {
+          let chunk = index == words.count - 1 ? word : word + " "
+          let cChunk = strdup(chunk)
+          let isLast = index == words.count - 1
+          
+          callback(cChunk!, isLast)
+          free(cChunk)
+          
+          // Small delay to simulate streaming
+          try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+        }
+        
+        log("Swift: Streaming completed")
+      } else {
+        // Fallback for older versions
+        let response = try await session.respond(to: prompt)
+        let cString = strdup(response.content)
+        callback(cString!, true) // true = isLast
+        free(cString)
+      }
     } catch {
       let errorMsg = "Error: \(error)"
       let cString = strdup(errorMsg)
-      callback(cString!)
+      callback(cString!, true) // true = isLast (error ends stream)
       free(cString)
+      log("Swift: Streaming error: \(error)")
+    }
+  }
+}
+
+
+@_cdecl("RespondWithToolsStreaming")
+public func RespondWithToolsStreaming(
+  _ sessionPtr: UnsafeMutableRawPointer,
+  _ cPrompt: UnsafePointer<CChar>,
+  _ callback: @escaping @convention(c) (UnsafePointer<CChar>, Bool) -> Void
+) {
+  let wrapper = Unmanaged<SessionWrapper>
+    .fromOpaque(sessionPtr)
+    .takeUnretainedValue()
+  let prompt = String(cString: cPrompt)
+  
+  log("Swift: Starting streaming response with tools for prompt: \(prompt)")
+  
+  Task {
+    do {
+      log("Swift: Using session with \(wrapper.tools.count) tools for streaming")
+      
+      let response = try await wrapper.session.respond(to: prompt)
+      
+      // Simulate streaming for tool responses
+      let content = response.content
+      let sentences = content.components(separatedBy: ". ")
+      
+      log("Swift: Streaming tool response with \(sentences.count) sentence chunks")
+      
+      for (index, sentence) in sentences.enumerated() {
+        let chunk = index == sentences.count - 1 ? sentence : sentence + ". "
+        let cChunk = strdup(chunk)
+        let isLast = index == sentences.count - 1
+        
+        callback(cChunk!, isLast)
+        free(cChunk)
+        
+        // Slightly longer delay for tool responses
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+      }
+      
+      log("Swift: Tool streaming completed")
+    } catch {
+      let errorMsg = "Error: \(error)"
+      let cString = strdup(errorMsg)
+      callback(cString!, true) // true = isLast (error ends stream)
+      free(cString)
+      log("Swift: Tool streaming error: \(error)")
     }
   }
 }

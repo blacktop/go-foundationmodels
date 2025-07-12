@@ -22,6 +22,7 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/apex/log"
@@ -33,7 +34,7 @@ func init() {
 	log.SetHandler(clihander.Default)
 
 	// Add global flags that all subcommands can inherit
-	rootCmd.PersistentFlags().Bool("logs", false, "Show Swift debugging logs")
+	rootCmd.PersistentFlags().BoolP("verbose", "V", false, "Show debug logs (both Go and Swift)")
 
 	// Settings
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
@@ -43,6 +44,25 @@ func init() {
 var rootCmd = &cobra.Command{
 	Use:   "found",
 	Short: "Interact with Apple's Foundation Models",
+}
+
+// SetupSlog configures slog based on the verbose flag
+func SetupSlog(verbose bool) {
+	if verbose {
+		// Configure slog for debug level output
+		handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level:     slog.LevelDebug,
+			AddSource: false, // Keep it clean for CLI usage
+		})
+		slog.SetDefault(slog.New(handler))
+		slog.Debug("Go debug logging enabled")
+	} else {
+		// Configure slog for info level and above (default behavior)
+		handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})
+		slog.SetDefault(slog.New(handler))
+	}
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

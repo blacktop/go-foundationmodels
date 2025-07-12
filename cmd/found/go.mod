@@ -11,6 +11,7 @@ require (
 replace github.com/blacktop/go-foundationmodels => ../..
 
 require (
+	github.com/briandowns/spinner v1.23.2 // indirect
 	github.com/ebitengine/purego v0.8.4 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -19,4 +20,5 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/term v0.1.0 // indirect
 )

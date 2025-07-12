@@ -21,6 +21,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,6 +44,8 @@ var (
 	respondWithStructuredOutput   uintptr
 	respondWithTools              uintptr
 	respondWithOptions            uintptr
+	respondWithStreaming          uintptr
+	respondWithToolsStreaming     uintptr
 	getModelInfo                  uintptr
 	registerTool                  uintptr
 	clearTools                    uintptr
@@ -149,6 +152,17 @@ func initializeShim() error {
 	getLogs, err = purego.Dlsym(shimLib, "GetLogs")
 	if err != nil {
 		return fmt.Errorf("failed to load GetLogs: %v", err)
+	}
+
+	// Load streaming function symbols
+	respondWithStreaming, err = purego.Dlsym(shimLib, "RespondWithStreaming")
+	if err != nil {
+		return fmt.Errorf("failed to load RespondWithStreaming: %v", err)
+	}
+
+	respondWithToolsStreaming, err = purego.Dlsym(shimLib, "RespondWithToolsStreaming")
+	if err != nil {
+		return fmt.Errorf("failed to load RespondWithToolsStreaming: %v", err)
 	}
 
 	// Load system libc for memory management
@@ -321,50 +335,79 @@ type Session struct {
 
 // NewSession creates a new LanguageModelSession using the Swift shim
 func NewSession() *Session {
+	slog.Debug("Creating new Foundation Models session")
+
 	if !shimInitialized {
+		slog.Error("Foundation Models shim not initialized", "error", shimInitError)
 		fmt.Printf("Foundation Models shim not initialized: %v\n", shimInitError)
 		return nil
 	}
 
 	ptr, _, _ := purego.SyscallN(createSess)
 	if ptr == 0 {
+		slog.Error("Failed to create LanguageModelSession")
 		fmt.Println("Failed to create LanguageModelSession")
 		return nil
 	}
-	return &Session{
+
+	session := &Session{
 		ptr:             unsafe.Pointer(ptr),
 		contextSize:     0,
 		maxContextSize:  MAX_CONTEXT_SIZE,
 		registeredTools: make(map[string]Tool),
 	}
+
+	slog.Debug("Successfully created Foundation Models session",
+		"ptr", ptr,
+		"max_context", MAX_CONTEXT_SIZE)
+
+	return session
 }
 
 // NewSessionWithInstructions creates a new LanguageModelSession with system instructions
 func NewSessionWithInstructions(instructions string) *Session {
+	slog.Debug("Creating new Foundation Models session with instructions",
+		"instructions_length", len(instructions))
+
 	if !shimInitialized {
+		slog.Error("Foundation Models shim not initialized", "error", shimInitError)
 		fmt.Printf("Foundation Models shim not initialized: %v\n", shimInitError)
 		return nil
 	}
 
 	// Validate instructions length
 	instructionTokens := estimateTokens(instructions)
+	slog.Debug("Estimated instruction tokens", "tokens", instructionTokens)
+
 	if instructionTokens > 1000 { // Reserve space for conversation
+		slog.Warn("System instructions are very long",
+			"tokens", instructionTokens,
+			"recommended_max", 1000)
 		fmt.Printf("Warning: System instructions are very long (%d tokens). Consider shortening them.\n", instructionTokens)
 	}
 
 	cInstructions := cString(instructions)
 	ptr, _, _ := purego.SyscallN(createSessionWithInstructions, uintptr(cInstructions))
 	if ptr == 0 {
+		slog.Error("Failed to create LanguageModelSession with instructions")
 		fmt.Println("Failed to create LanguageModelSession with instructions")
 		return nil
 	}
-	return &Session{
+
+	session := &Session{
 		ptr:                unsafe.Pointer(ptr),
 		contextSize:        instructionTokens,
 		maxContextSize:     MAX_CONTEXT_SIZE,
 		systemInstructions: instructions,
 		registeredTools:    make(map[string]Tool),
 	}
+
+	slog.Debug("Successfully created Foundation Models session with instructions",
+		"ptr", ptr,
+		"initial_context", instructionTokens,
+		"max_context", MAX_CONTEXT_SIZE)
+
+	return session
 }
 
 // Release releases the session memory
@@ -492,7 +535,12 @@ func (s *Session) RefreshSession() *Session {
 
 // RegisterTool registers a tool with the session
 func (s *Session) RegisterTool(tool Tool) error {
+	slog.Debug("Registering tool",
+		"tool_name", tool.Name(),
+		"tool_description", tool.Description())
+
 	if s.ptr == nil {
+		slog.Error("RegisterTool called with invalid session")
 		return fmt.Errorf("invalid session")
 	}
 
@@ -508,6 +556,7 @@ func (s *Session) RegisterTool(tool Tool) error {
 	}
 
 	// Extract parameter definitions if the tool supports them
+	paramCount := 0
 	if schematizedTool, ok := tool.(SchematizedTool); ok {
 		for _, arg := range schematizedTool.GetParameters() {
 			var enumValues []string
@@ -524,16 +573,23 @@ func (s *Session) RegisterTool(tool Tool) error {
 				Required:    arg.Required,
 				Enum:        enumValues,
 			}
+			paramCount++
 		}
 	}
 
+	slog.Debug("Tool definition created",
+		"parameters_count", paramCount,
+		"tool_name", tool.Name())
+
 	toolDefJSON, err := json.Marshal(toolDef)
 	if err != nil {
+		slog.Error("Failed to marshal tool definition", "error", err)
 		return fmt.Errorf("failed to marshal tool definition: %v", err)
 	}
 
 	cToolDef := cString(string(toolDefJSON))
 
+	slog.Debug("Calling Swift RegisterTool")
 	// Register with Swift shim
 	result, _, _ := purego.SyscallN(
 		registerTool,
@@ -542,8 +598,13 @@ func (s *Session) RegisterTool(tool Tool) error {
 	)
 
 	if result == 0 {
+		slog.Error("Failed to register tool in Swift shim", "tool_name", tool.Name())
 		return fmt.Errorf("failed to register tool in Swift shim")
 	}
+
+	slog.Debug("Successfully registered tool",
+		"tool_name", tool.Name(),
+		"total_tools", len(s.registeredTools))
 
 	return nil
 }
@@ -740,12 +801,19 @@ func freePtr(ptr unsafe.Pointer) {
 // Respond sends a prompt to the language model and returns the response
 // If options is nil, uses default generation settings
 func (s *Session) Respond(prompt string, options *GenerationOptions) string {
+	slog.Debug("Respond called",
+		"prompt_length", len(prompt),
+		"has_options", options != nil,
+		"context_before", s.contextSize)
+
 	if s.ptr == nil {
+		slog.Error("Respond called with invalid session")
 		return "Error: Invalid session"
 	}
 
 	// Validate context size before sending
 	if err := s.validateContextSize(prompt); err != nil {
+		slog.Error("Context size validation failed", "error", err)
 		return fmt.Sprintf("Error: %v", err)
 	}
 
@@ -762,11 +830,15 @@ func (s *Session) Respond(prompt string, options *GenerationOptions) string {
 			temperature = *options.Temperature
 		}
 
+		slog.Debug("Using RespondWithOptions",
+			"max_tokens", maxTokens,
+			"temperature", temperature)
 		return s.RespondWithOptions(prompt, maxTokens, temperature)
 	}
 
 	cPrompt := cString(prompt)
 
+	slog.Debug("Calling Swift RespondSync")
 	// Call RespondSync from the Swift shim
 	respPtr, _, _ := purego.SyscallN(
 		respondSync,
@@ -775,11 +847,15 @@ func (s *Session) Respond(prompt string, options *GenerationOptions) string {
 	)
 
 	if respPtr == 0 {
+		slog.Error("No response from FoundationModels")
 		return "Error: No response from FoundationModels"
 	}
 
 	// Convert response to Go string
 	response := goString(unsafe.Pointer(respPtr))
+	slog.Debug("Received response",
+		"response_length", len(response),
+		"response_preview", response[:min(50, len(response))])
 
 	// Free the C string returned by the Swift shim
 	freePtr(unsafe.Pointer(respPtr))
@@ -787,6 +863,8 @@ func (s *Session) Respond(prompt string, options *GenerationOptions) string {
 	// Update context size with prompt and response
 	s.addToContext(prompt)
 	s.addToContext(response)
+
+	slog.Debug("Updated context", "context_after", s.contextSize)
 
 	return response
 }
@@ -828,17 +906,36 @@ func (s *Session) RespondWithStructuredOutput(prompt string) string {
 
 // RespondWithTools sends a prompt with tool calling enabled
 func (s *Session) RespondWithTools(prompt string) string {
+	slog.Debug("RespondWithTools called",
+		"prompt_length", len(prompt),
+		"registered_tools", len(s.registeredTools),
+		"context_before", s.contextSize)
+
 	if s.ptr == nil {
+		slog.Error("RespondWithTools called with invalid session")
 		return "Error: Invalid session"
+	}
+
+	// Log registered tools
+	if len(s.registeredTools) > 0 {
+		var toolNames []string
+		for name := range s.registeredTools {
+			toolNames = append(toolNames, name)
+		}
+		slog.Debug("Available tools", "tools", toolNames)
+	} else {
+		slog.Warn("RespondWithTools called but no tools registered")
 	}
 
 	// Validate context size before sending
 	if err := s.validateContextSize(prompt); err != nil {
+		slog.Error("Context size validation failed", "error", err)
 		return fmt.Sprintf("Error: %v", err)
 	}
 
 	cPrompt := cString(prompt)
 
+	slog.Debug("Calling Swift RespondWithTools")
 	respPtr, _, _ := purego.SyscallN(
 		respondWithTools,
 		uintptr(s.ptr),
@@ -846,10 +943,14 @@ func (s *Session) RespondWithTools(prompt string) string {
 	)
 
 	if respPtr == 0 {
+		slog.Error("No response from FoundationModels RespondWithTools")
 		return "Error: No response from FoundationModels"
 	}
 
 	response := goString(unsafe.Pointer(respPtr))
+	slog.Debug("Received tool response",
+		"response_length", len(response),
+		"response_preview", response[:min(50, len(response))])
 
 	// Free the C string returned by the Swift shim
 	freePtr(unsafe.Pointer(respPtr))
@@ -857,6 +958,8 @@ func (s *Session) RespondWithTools(prompt string) string {
 	// Update context size with prompt and response
 	s.addToContext(prompt)
 	s.addToContext(response)
+
+	slog.Debug("Updated context after tool response", "context_after", s.contextSize)
 
 	return response
 }
@@ -1007,6 +1110,91 @@ func (s *Session) RespondWithToolsTimeout(timeout time.Duration, prompt string) 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return s.RespondWithToolsContext(ctx, prompt)
+}
+
+// StreamingCallback is called for each chunk of streaming response
+type StreamingCallback func(chunk string, isLast bool)
+
+// RespondWithStreaming generates a response with streaming output
+func (s *Session) RespondWithStreaming(prompt string, callback StreamingCallback) {
+	if s.ptr == nil {
+		callback("Error: Session is not initialized", true)
+		return
+	}
+
+	if !shimInitialized {
+		callback(fmt.Sprintf("Error: Foundation Models shim not initialized: %v", shimInitError), true)
+		return
+	}
+
+	// Validate context before proceeding
+	if err := s.validateContextSize(prompt); err != nil {
+		callback(fmt.Sprintf("Error: %v", err), true)
+		return
+	}
+
+	cPrompt := cString(prompt)
+	defer freePtr(cPrompt)
+
+	// Create a callback wrapper that handles the isLast boolean properly
+	callbackWrapper := func(cChunk *byte, isLast bool) {
+		if cChunk == nil {
+			callback("", true)
+			return
+		}
+		chunk := goString(unsafe.Pointer(cChunk))
+		callback(chunk, isLast)
+	}
+
+	// Call the Swift streaming function
+	purego.SyscallN(respondWithStreaming,
+		uintptr(s.ptr),
+		uintptr(cPrompt),
+		uintptr(unsafe.Pointer(&callbackWrapper)))
+
+	// Update context with the prompt (estimation)
+	s.addToContext(prompt)
+}
+
+// RespondWithToolsStreaming generates a response with tools using streaming output
+func (s *Session) RespondWithToolsStreaming(prompt string, callback StreamingCallback) {
+	if s.ptr == nil {
+		callback("Error: Session is not initialized", true)
+		return
+	}
+
+	if !shimInitialized {
+		callback(fmt.Sprintf("Error: Foundation Models shim not initialized: %v", shimInitError), true)
+		return
+	}
+
+	// Validate context before proceeding
+	if err := s.validateContextSize(prompt); err != nil {
+		callback(fmt.Sprintf("Error: %v", err), true)
+		return
+	}
+
+	cPrompt := cString(prompt)
+	defer freePtr(cPrompt)
+
+	// Create a callback wrapper for tools streaming
+	callbackWrapper := func(cChunk *byte, isLast bool) {
+		if cChunk == nil {
+			callback("", true)
+			return
+		}
+		chunk := goString(unsafe.Pointer(cChunk))
+		callback(chunk, isLast)
+	}
+
+	// Call the Swift tools streaming function
+	purego.SyscallN(respondWithToolsStreaming,
+		uintptr(s.ptr),
+		uintptr(cPrompt),
+		uintptr(unsafe.Pointer(&callbackWrapper)))
+
+	// Update context with the prompt (estimation)
+	s.addToContext(prompt)
 }
 
 // Tool validation helpers

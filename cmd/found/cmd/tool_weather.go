@@ -290,38 +290,42 @@ The assistant will respond with friendly, informative weather descriptions.`,
   found tool weather "San Francisco"
   found tool weather "Berlin, Germany"
   found tool weather "Sydney, Australia"
-  
+
   # Test Go tool directly (bypass Foundation Models)
   found tool weather --direct "New York"`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		location := args[0]
-		
+
+		// Setup slog based on verbose flag
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		SetupSlog(verbose)
+
 		// Check if --direct flag is set to bypass Foundation Models
 		directMode, _ := cmd.Flags().GetBool("direct")
-		
+
 		if directMode {
 			fmt.Printf("🔧 Direct Mode: Testing Go WeatherTool directly\n")
 			fmt.Printf("Location: %s\n", location)
 			fmt.Print("Fetching weather data directly from Go tool...")
-			
+
 			// Create weather tool and execute directly
 			weather := &WeatherTool{}
 			args := map[string]any{
 				"location": location,
 			}
-			
+
 			result, err := weather.Execute(args)
 			if err != nil {
 				fmt.Printf("\n❌ Error executing weather tool: %v\n", err)
 				return
 			}
-			
+
 			if result.Error != "" {
 				fmt.Printf("\n❌ Weather tool returned error: %s\n", result.Error)
 				return
 			}
-			
+
 			fmt.Print("\r" + strings.Repeat(" ", 50) + "\r") // Clear loading message
 			fmt.Println("\n" + strings.Repeat("=", 60))
 			fmt.Println("📊 DIRECT GO TOOL RESULT:")
@@ -361,31 +365,35 @@ When users ask for the weather:
 		}
 
 		fmt.Printf("🌤️  Weather Tool Ready\n")
-		fmt.Printf("Location: %s\n", location)
-		fmt.Print("Fetching weather data...")
 
 		// Create prompt for weather query
 		prompt := fmt.Sprintf("What's the weather like in %s?", location)
 
+		// Create chat UI
+		chatUI := NewChatUI()
+
+		// Display user question
+		chatUI.PrintUserMessage(prompt)
+
+		// Show typing indicator while waiting for response
+		chatUI.ShowTypingIndicator()
+
 		// Get response using tools
 		response := sess.RespondWithTools(prompt)
 
-		fmt.Print("\r" + strings.Repeat(" ", 30) + "\r") // Clear "Fetching..." message
-		fmt.Println("\n" + strings.Repeat("=", 50))
-		fmt.Println(response)
-		fmt.Println(strings.Repeat("=", 50))
+		// Hide typing indicator and display assistant response
+		chatUI.HideTypingIndicator()
+		chatUI.PrintAssistantMessage(response)
 
 		// Show context usage
-		fmt.Printf("\nContext Usage: %d/%d tokens (%.1f%% used)\n",
-			sess.GetContextSize(), sess.GetMaxContextSize(), sess.GetContextUsagePercent())
+		chatUI.PrintContextUsage(sess.GetContextSize(), sess.GetMaxContextSize(), sess.GetContextUsagePercent())
 
-		// Print logs from Swift shim only if --logs flag is set
-		showLogs, _ := cmd.Flags().GetBool("logs")
-		if showLogs {
+		// Print Swift logs if --verbose flag is set
+		if verbose {
 			fmt.Println("\n=== Swift Logs ===")
 			fmt.Println(fm.GetLogs())
 		}
-    },
+	},
 }
 
 func init() {
