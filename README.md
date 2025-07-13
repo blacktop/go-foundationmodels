@@ -218,12 +218,12 @@ While tool calling is functional, Foundation Models exhibits some variability:
 
 ## Roadmap
 
-- [x] **Fix tool calling reliability** - ✅ **COMPLETED** - Tools now work with real data
-- [x] **Swift-Go callback mechanism** - ✅ **COMPLETED** - Reliable bidirectional communication
-- [x] **Tool debugging capabilities** - ✅ **COMPLETED** - `--verbose` flag for comprehensive debug logs
-- [x] **Direct tool testing** - ✅ **COMPLETED** - `--direct` flag bypasses Foundation Models
-- [x] **Streaming responses** - ✅ **COMPLETED** - Simulated streaming with word/sentence chunks (native streaming pending Foundation Models API)
-- [x] **Structured logging** - ✅ **COMPLETED** - Go slog integration with consolidated debug logging
+- [x] **Fix tool calling reliability** - Tools now work with real data
+- [x] **Swift-Go callback mechanism** - Reliable bidirectional communication
+- [x] **Tool debugging capabilities** - `--verbose` flag for comprehensive debug logs
+- [x] **Direct tool testing** - `--direct` flag bypasses Foundation Models
+- [x] **Streaming responses** - Simulated streaming with word/sentence chunks (native streaming pending Foundation Models API)
+- [x] **Structured logging** - Go slog integration with consolidated debug logging
 - [ ] **Advanced tool schemas** with OpenAPI-style definitions
 - [ ] **Multi-modal support** (images, audio) when available
 - [ ] **Performance optimizations** for large contexts
