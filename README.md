@@ -173,15 +173,13 @@ Use `found --help` or `found [command] --help` to see all available commands and
 **Available commands:**
 - `found info` - Display model availability and system information
 - `found quest` - Interactive chat with streaming support, system instructions and JSON output
-- `found stream` - Real-time streaming text generation with optional tools ✅
-- `found tool calc` - Mathematical calculations with real arithmetic ✅
-- `found tool weather` - Real-time weather data with geocoding ✅
+- `found stream` - Real-time streaming text generation with optional tools
+- `found tool calc` - Mathematical calculations with real arithmetic
+- `found tool weather` - Real-time weather data with geocoding
 
 ![demo](vhs.gif)
 
-## Working Examples
-
-### Tool Calling Success Stories ✅
+### Tool Calling Success Stories
 
 **Weather Tool**: Get real-time weather data
 ```bash
