@@ -52,7 +52,7 @@ Apple's [Foundation Models](https://developer.apple.com/documentation/foundation
 - **Session refresh**: Seamless context window management
 
 ### Robust Architecture
-- **Pure Go implementation**: No CGO dependencies, uses purego for Swift bridge
+- **Dual build modes**: Pure Go (purego) or static compilation (CGO) options
 - **Memory safety**: Automatic C string cleanup and proper resource management
 - **Error resilience**: Graceful initialization failure handling
 - **Self-contained**: Embedded Swift shim library with automatic extraction
@@ -74,6 +74,22 @@ Apple's [Foundation Models](https://developer.apple.com/documentation/foundation
 ```bash
 go get github.com/blacktop/go-foundationmodels
 ```
+
+## Build Options
+
+This package supports two build modes:
+
+### Default Build (Pure Go with purego)
+```bash
+go build  # Uses embedded dynamic library (.dylib)
+```
+
+### Static Build (CGO with static library)
+```bash
+CGO_ENABLED=1 go build  # Compiles Swift code directly into binary
+```
+
+The static build creates a self-contained binary with the Swift Foundation Models bridge compiled directly into the executable. This eliminates the need for a separate dynamic library while maintaining full functionality.
 
 ### Basic Usage
 
@@ -149,6 +165,22 @@ func main() {
     fmt.Println(response) // "The result is 42.00"
 }
 ```
+
+## Development
+
+### Building from Source
+
+**Dynamic build (default):**
+```bash
+make build  # Creates 'found' binary with .dylib dependency
+```
+
+**Static build:**
+```bash
+make build-static  # Creates 'found-static' binary with embedded Swift code
+```
+
+The static build automatically compiles the Swift Foundation Models bridge into a static library and links it directly into the Go binary.
 
 ## CLI tool `found`
 

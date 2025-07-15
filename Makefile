@@ -21,6 +21,14 @@ build: libFMShim.dylib
 	@echo "🚀 Building Version $(shell svu current)"
 	go build -o found ./cmd/found
 
+.PHONY: build-static
+build-static:
+	@echo "🚀 Building static version with CGO"
+	@echo "Generating static library..."
+	go generate ./...
+	@echo "Building with CGO enabled..."
+	cd cmd/found && CGO_ENABLED=1 go build -o ../../found-static .
+
 .PHONY: release
 release: libFMShim.dylib
 	@echo "🚀 Releasing Version $(shell svu current)"
@@ -40,5 +48,8 @@ vhs: release
 clean:
 	@echo "🧹 Cleaning up..."
 	rm -f libFMShim.dylib
+	rm -f libFMShim.a
+	rm -f libFMShim.o
 	rm -f found
+	rm -f found-static
 	rm -rf dist

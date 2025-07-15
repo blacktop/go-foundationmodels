@@ -1,3 +1,6 @@
+//go:build !cgo
+// +build !cgo
+
 // Package fm provides a pure Go wrapper around macOS Foundation Models framework
 // using purego to call a Swift shim library that exports C functions.
 //
