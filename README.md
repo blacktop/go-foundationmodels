@@ -187,7 +187,7 @@ The static build automatically compiles the Swift Foundation Models bridge into 
 Install with Homebrew:
 
 ```bash
-brew install blacktop/tap/found
+brew install blacktop/tap/go-foundationmodels
 ```
 
 Install with Go:
