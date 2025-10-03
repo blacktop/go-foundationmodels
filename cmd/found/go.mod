@@ -5,15 +5,15 @@ go 1.24
 require (
 	github.com/apex/log v1.9.0
 	github.com/blacktop/go-foundationmodels v0.1.1
+	github.com/briandowns/spinner v1.23.2
+	github.com/fatih/color v1.18.0
 	github.com/spf13/cobra v1.9.1
 )
 
 replace github.com/blacktop/go-foundationmodels => ../..
 
 require (
-	github.com/briandowns/spinner v1.23.2 // indirect
-	github.com/ebitengine/purego v0.8.4 // indirect
-	github.com/fatih/color v1.18.0 // indirect
+	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

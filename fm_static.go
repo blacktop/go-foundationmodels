@@ -24,12 +24,81 @@ void ReleaseSession(void* session);
 int CheckModelAvailability(void);
 char* RespondSync(void* session, const char* prompt);
 char* GetModelInfo(void);
+char* GetLogs(void);
+
+// Tool calling functions
+int RegisterTool(void* session, const char* toolDefJSON);
+int ClearTools(void* session);
+char* RespondWithTools(void* session, const char* prompt);
 */
 import "C"
 import (
+	"encoding/json"
 	"fmt"
+	"sync"
 	"unsafe"
 )
+
+// Global tool registry for CGO callbacks
+var (
+	toolRegistry   = make(map[string]Tool)
+	toolRegistryMu sync.RWMutex
+)
+
+// toolExecuteCallback is the CGO callback that Swift calls when a tool needs to be executed
+//
+//export toolExecuteCallback
+func toolExecuteCallback(cToolName *C.char, cArgsJSON *C.char) *C.char {
+	toolName := C.GoString(cToolName)
+	argsJSON := C.GoString(cArgsJSON)
+
+	// Look up the tool
+	toolRegistryMu.RLock()
+	tool, exists := toolRegistry[toolName]
+	toolRegistryMu.RUnlock()
+
+	if !exists {
+		result := map[string]string{"error": fmt.Sprintf("Tool not found: %s", toolName)}
+		resultJSON, _ := json.Marshal(result)
+		return C.CString(string(resultJSON))
+	}
+
+	// Parse the outer wrapper that contains {"arguments": "..."}
+	var wrapper map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &wrapper); err != nil {
+		result := map[string]string{"error": fmt.Sprintf("Failed to parse argument wrapper: %v", err)}
+		resultJSON, _ := json.Marshal(result)
+		return C.CString(string(resultJSON))
+	}
+
+	// Extract the inner arguments JSON string
+	argsStr, ok := wrapper["arguments"].(string)
+	if !ok {
+		result := map[string]string{"error": "Arguments field is not a string"}
+		resultJSON, _ := json.Marshal(result)
+		return C.CString(string(resultJSON))
+	}
+
+	// Parse the actual arguments
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+		result := map[string]string{"error": fmt.Sprintf("Failed to parse inner arguments: %v", err)}
+		resultJSON, _ := json.Marshal(result)
+		return C.CString(string(resultJSON))
+	}
+
+	// Execute the tool
+	toolResult, err := tool.Execute(args)
+	if err != nil {
+		result := map[string]string{"error": err.Error()}
+		resultJSON, _ := json.Marshal(result)
+		return C.CString(string(resultJSON))
+	}
+
+	// Return result as JSON
+	resultJSON, _ := json.Marshal(toolResult)
+	return C.CString(string(resultJSON))
+}
 
 // Tool represents a tool that can be called by the Foundation Models
 type Tool interface {
@@ -114,7 +183,10 @@ type SessionInterface interface {
 
 // CGO-based session implementation
 type cgoSession struct {
-	ptr unsafe.Pointer
+	ptr           unsafe.Pointer
+	tools         []Tool
+	callbackSet   bool
+	callbackSetMu sync.Mutex
 }
 
 // newCGOSession creates a new session using CGO
@@ -123,7 +195,9 @@ func newCGOSession() (SessionInterface, error) {
 		return nil, err
 	}
 	ptr := C.CreateSession()
-	return &cgoSession{ptr: ptr}, nil
+	sess := &cgoSession{ptr: ptr}
+	sess.ensureCallbackSet()
+	return sess, nil
 }
 
 // newCGOSessionWithInstructions creates a session with instructions using CGO
@@ -134,7 +208,15 @@ func newCGOSessionWithInstructions(instructions string) (SessionInterface, error
 	cInstructions := C.CString(instructions)
 	defer C.free(unsafe.Pointer(cInstructions))
 	ptr := C.CreateSessionWithInstructions(cInstructions)
-	return &cgoSession{ptr: ptr}, nil
+	sess := &cgoSession{ptr: ptr}
+	sess.ensureCallbackSet()
+	return sess, nil
+}
+
+// ensureCallbackSet is a no-op now since Swift directly calls the exported Go function
+func (s *cgoSession) ensureCallbackSet() {
+	// The toolExecuteCallback function is exported via //export directive
+	// Swift uses @_silgen_name to call it directly - no setup needed
 }
 
 func checkModelAvailability() error {
@@ -164,8 +246,75 @@ func (s *cgoSession) Respond(prompt string) (string, error) {
 }
 
 func (s *cgoSession) RespondWithTools(prompt string, tools []Tool) (string, error) {
-	// For now, fall back to basic respond since tool setup is complex
-	return s.Respond(prompt)
+	// Register all tools with the session
+	for _, tool := range tools {
+		if err := s.registerTool(tool); err != nil {
+			return "", fmt.Errorf("failed to register tool %s: %w", tool.Name(), err)
+		}
+	}
+
+	// Call the Swift RespondWithTools function
+	cPrompt := C.CString(prompt)
+	defer C.free(unsafe.Pointer(cPrompt))
+
+	result := C.RespondWithTools(s.ptr, cPrompt)
+	defer C.free(unsafe.Pointer(result))
+
+	return C.GoString(result), nil
+}
+
+// registerTool registers a single tool with the session
+func (s *cgoSession) registerTool(tool Tool) error {
+	// Add to session's tool list
+	s.tools = append(s.tools, tool)
+
+	// Add to global registry for callback lookups
+	toolRegistryMu.Lock()
+	toolRegistry[tool.Name()] = tool
+	toolRegistryMu.Unlock()
+
+	// Create tool definition for Swift
+	toolDef := struct {
+		Name        string                    `json:"name"`
+		Description string                    `json:"description"`
+		Parameters  map[string]map[string]any `json:"parameters,omitempty"`
+	}{
+		Name:        tool.Name(),
+		Description: tool.Description(),
+		Parameters:  make(map[string]map[string]any),
+	}
+
+	// Add parameters if tool supports schema
+	if schematizedTool, ok := tool.(SchematizedTool); ok {
+		for _, arg := range schematizedTool.GetParameters() {
+			paramDef := map[string]any{
+				"type":        arg.Type,
+				"description": arg.Description,
+				"required":    arg.Required,
+			}
+			if len(arg.Enum) > 0 {
+				paramDef["enum"] = arg.Enum
+			}
+			toolDef.Parameters[arg.Name] = paramDef
+		}
+	}
+
+	// Marshal to JSON
+	toolDefJSON, err := json.Marshal(toolDef)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tool definition: %w", err)
+	}
+
+	// Register with Swift
+	cToolDef := C.CString(string(toolDefJSON))
+	defer C.free(unsafe.Pointer(cToolDef))
+
+	status := C.RegisterTool(s.ptr, cToolDef)
+	if status == 0 {
+		return fmt.Errorf("failed to register tool with Swift (see logs)")
+	}
+
+	return nil
 }
 
 func (s *cgoSession) RespondWithOptions(prompt string, options *GenerationOptions) (string, error) {
@@ -271,7 +420,8 @@ func (s *SessionCompat) Respond(prompt string, options *GenerationOptions) strin
 }
 
 func (s *SessionCompat) RespondWithTools(prompt string) string {
-	result, _ := s.cgoSess.RespondWithTools(prompt, nil)
+	// Use the tools registered with the session
+	result, _ := s.cgoSess.RespondWithTools(prompt, s.cgoSess.tools)
 	return result
 }
 
@@ -315,13 +465,22 @@ func (s *SessionCompat) RespondWithStructuredOutput(prompt string) string {
 
 // Additional methods for tool management
 func (s *SessionCompat) RegisterTool(tool Tool) error {
-	// Store tool and register with session
-	// For now, just store it for later use
-	return nil
+	return s.cgoSess.registerTool(tool)
 }
 
 func (s *SessionCompat) ClearTools() error {
-	// Clear tools from session
+	// Clear from Swift session
+	status := C.ClearTools(s.cgoSess.ptr)
+	if status == 0 {
+		return fmt.Errorf("failed to clear tools (see logs)")
+	}
+	// Clear from Go session
+	s.cgoSess.tools = nil
+	// Clear from global registry
+	toolRegistryMu.Lock()
+	toolRegistry = make(map[string]Tool)
+	toolRegistryMu.Unlock()
+
 	return nil
 }
 
@@ -338,10 +497,11 @@ func (s *SessionCompat) RespondWithStreaming(prompt string, callback func(chunk 
 	s.cgoSess.RespondStreaming(prompt, callback)
 }
 
-// GetLogs returns logs from the Swift shim (placeholder)
+// GetLogs returns logs from the Swift shim
 func GetLogs() string {
-	// In CGO version, we don't have the logs functionality yet
-	return "Logs not available in CGO version"
+	result := C.GetLogs()
+	defer C.free(unsafe.Pointer(result))
+	return C.GoString(result)
 }
 
 // ValidateToolArguments validates tool arguments against argument definitions

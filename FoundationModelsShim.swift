@@ -127,15 +127,9 @@ public func RespondSync(
 
 // MARK: - Structured Output Generation
 
-@Generable
 public struct JSONOutput: Codable {
-  @Guide(description: "The main content or response")
   let content: String
-  
-  @Guide(description: "Additional metadata or context")
   let metadata: String?
-  
-  @Guide(description: "Confidence score from 0.0 to 1.0")
   let confidence: Double?
 }
 
@@ -201,12 +195,48 @@ public final class DynamicTool: Tool {
   public let description: String
   public let parameters: GenerationSchema
   
-  // The Arguments type must conform to 'Generable' for the Tool protocol.
-  // We can define a struct that can hold the expected arguments.
-  @Generable
-  public struct Arguments {
-    @Guide(description: "The arguments for the tool, in JSON format")
+  // The Arguments type must conform to ConvertibleFromGeneratedContent so we
+  // can receive structured input from Foundation Models.
+  public struct Arguments: ConvertibleFromGeneratedContent, ConvertibleToGeneratedContent, Generable, Sendable {
     public var arguments: String
+
+    public init(arguments: String) {
+      self.arguments = arguments
+    }
+
+    public init(_ content: GeneratedContent) throws {
+      switch content.kind {
+      case .string(let value):
+        self.arguments = value
+      default:
+        self.arguments = content.jsonString
+      }
+    }
+
+    public var generatedContent: GeneratedContent {
+      if let parsed = try? GeneratedContent(json: arguments) {
+        return parsed
+      }
+      return GeneratedContent(arguments)
+    }
+
+    public static var generationSchema: GenerationSchema {
+      do {
+        let argumentSchema = DynamicGenerationSchema(type: String.self)
+        let argumentProperty = DynamicGenerationSchema.Property(
+          name: "arguments",
+          description: "A JSON string containing the tool arguments.",
+          schema: argumentSchema
+        )
+        let rootSchema = DynamicGenerationSchema(
+          name: "DynamicToolArguments",
+          properties: [argumentProperty]
+        )
+        return try GenerationSchema(root: rootSchema, dependencies: [])
+      } catch {
+        fatalError("Failed to construct arguments schema: \(error)")
+      }
+    }
   }
 
   init(name: String, description: String, parameters: GenerationSchema) {
@@ -215,7 +245,20 @@ public final class DynamicTool: Tool {
     self.parameters = parameters
   }
 
-  public func call(arguments: Arguments) async throws -> ToolOutput {
+  public struct Output: PromptRepresentable {
+    public let content: String
+
+    public init(_ content: String) {
+      self.content = content
+    }
+
+    @PromptBuilder
+    public var promptRepresentation: Prompt {
+      content
+    }
+  }
+
+  public func call(arguments: Arguments) async throws -> Output {
     log("Swift: DynamicTool.call invoked for tool '\(name)'")
     log("Swift: Raw arguments JSON: \(arguments.arguments)")
 
@@ -230,8 +273,8 @@ public final class DynamicTool: Tool {
     log("Swift: Tool execution result: \(result)")
 
     // Create tool output and return to Foundation Models
-    let toolOutput = ToolOutput(result)
-    log("Swift: Created ToolOutput, returning to Foundation Models")
+    let toolOutput = Output(result)
+    log("Swift: Created DynamicTool.Output, returning to Foundation Models")
 
     return toolOutput
   }
@@ -239,31 +282,23 @@ public final class DynamicTool: Tool {
 
 
 // Function pointer for calling back to Go
-private var goToolCallback: (@convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>)?
-
-@_cdecl("SetToolCallback")
-public func SetToolCallback(
-  _ callback: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>
-) {
-  goToolCallback = callback
-}
+// Declare the Go callback function that we'll call
+// This is exported from the Go side via //export toolExecuteCallback
+@_silgen_name("toolExecuteCallback")
+func toolExecuteCallback(_ toolName: UnsafePointer<CChar>, _ argsJSON: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>
 
 // Function to call Go tool execution
 private func executeGoTool(_ toolName: String, _ argsJSON: String) -> String {
-  guard let callback = goToolCallback else {
-    return "Error: No Go callback set"
-  }
-  
   let cToolName = strdup(toolName)
   let cArgsJSON = strdup(argsJSON)
-  
-  let result = callback(cToolName!, cArgsJSON!)
+
+  let result = toolExecuteCallback(cToolName!, cArgsJSON!)
   let resultString = String(cString: result)
-  
+
   free(cToolName)
   free(cArgsJSON)
   free(result)
-  
+
   return resultString
 }
 

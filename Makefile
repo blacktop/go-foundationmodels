@@ -17,9 +17,12 @@ libFMShim.dylib: FoundationModelsShim.swift
 	FoundationModelsShim.swift
 
 .PHONY: build
-build: libFMShim.dylib
+build:
 	@echo "🚀 Building Version $(shell svu current)"
-	go build -o found ./cmd/found
+	@echo "Generating static library (Swift + CGO)..."
+	@go generate ./...
+	@echo "Building Go binary with CGO..."
+	cd cmd/found && CGO_ENABLED=1 go build -o ../../found .
 
 .PHONY: build-static
 build-static:
