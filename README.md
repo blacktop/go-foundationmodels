@@ -28,7 +28,7 @@ Apple's [Foundation Models](https://developer.apple.com/documentation/foundation
 - **⚡ High performance**: Optimized for Apple Silicon with no network latency
 - **🚀 Streaming-first**: Simulated real-time response streaming with typing indicators for modern UX
 - **🛠️ Rich tooling**: Advanced features like input validation, context cancellation, and generation control
-- **📦 Self-contained**: Embedded Swift shim library - no external dependencies
+- **📦 Self-contained**: Swift bridge compiled directly into binary - true single-file deployment
 - **🎯 Production-ready**: Comprehensive error handling, memory management, and structured logging
 
 ## Features
@@ -52,10 +52,9 @@ Apple's [Foundation Models](https://developer.apple.com/documentation/foundation
 - **Session refresh**: Seamless context window management
 
 ### Robust Architecture
-- **Dual build modes**: Pure Go (purego) or static compilation (CGO) options
+- **Static compilation**: Swift bridge compiled directly into the Go binary via CGO
 - **Memory safety**: Automatic C string cleanup and proper resource management
 - **Error resilience**: Graceful initialization failure handling
-- **Self-contained**: Embedded Swift shim library with automatic extraction
 - **Structured logging**: Go slog integration with debug logging for both Go and Swift layers
 
 > [!WARNING]
@@ -67,7 +66,7 @@ Apple's [Foundation Models](https://developer.apple.com/documentation/foundation
 * **Apple Intelligence enabled** on your device
 * **Apple Silicon Mac** (M1/M2/M3/M4 series)
 * **Go 1.24+** (uses latest Go features)
-* **Xcode 15.x or later** (for Swift shim compilation if needed)
+* **Xcode 15.x or later** (required for Swift bridge compilation)
 
 ## Getting Started
 
@@ -75,21 +74,18 @@ Apple's [Foundation Models](https://developer.apple.com/documentation/foundation
 go get github.com/blacktop/go-foundationmodels
 ```
 
-## Build Options
+## Building
 
-This package supports two build modes:
+This package uses CGO to compile the Swift Foundation Models bridge directly into your Go binary:
 
-### Default Build (Pure Go with purego)
 ```bash
-go build  # Uses embedded dynamic library (.dylib)
+CGO_ENABLED=1 go build
 ```
 
-### Static Build (CGO with static library)
-```bash
-CGO_ENABLED=1 go build  # Compiles Swift code directly into binary
-```
-
-The static build creates a self-contained binary with the Swift Foundation Models bridge compiled directly into the executable. This eliminates the need for a separate dynamic library while maintaining full functionality.
+The build process automatically:
+1. Generates a static library from the Swift bridge code (`libFMShim.a`)
+2. Links it directly into your Go binary
+3. Creates a self-contained executable with no external dependencies
 
 ### Basic Usage
 
@@ -170,17 +166,11 @@ func main() {
 
 ### Building from Source
 
-**Dynamic build (default):**
 ```bash
-make build  # Creates 'found' binary with .dylib dependency
+make build  # Creates 'found' binary with Swift bridge compiled in
 ```
 
-**Static build:**
-```bash
-make build-static  # Creates 'found-static' binary with embedded Swift code
-```
-
-The static build automatically compiles the Swift Foundation Models bridge into a static library and links it directly into the Go binary.
+The build process automatically compiles the Swift Foundation Models bridge into a static library and links it directly into the Go binary, creating a self-contained executable.
 
 ## CLI tool `found`
 
