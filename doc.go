@@ -277,17 +277,18 @@ The package is not thread-safe. Use appropriate synchronization when accessing
 sessions from multiple goroutines. Context cancellation is goroutine-safe and can
 be used from any goroutine.
 
-# Swift Shim
+# Swift Bridge
 
-This package automatically manages the Swift shim library (libFMShim.dylib) that bridges
-Foundation Models APIs to C functions callable from Go via purego.
+This package uses CGO to compile a Swift bridge (FoundationModelsShim.swift) directly
+into the Go binary. The Swift code bridges Foundation Models APIs to C functions
+callable from Go.
 
-The library search strategy:
-1. Look for existing libFMShim.dylib in current directory and common paths
-2. If not found, automatically extract embedded library to temp directory
-3. Load the library and initialize the Foundation Models interface
+Build process:
+1. Swift code is compiled to a static library (libFMShim.a) via go generate
+2. The static library is linked into the Go binary during compilation
+3. The resulting binary is self-contained with no external dependencies
 
-No manual setup required - the package is fully self-contained!
+Requires: CGO_ENABLED=1, Xcode, and macOS 26+ with Apple Intelligence enabled.
 
 # Limitations
 

@@ -1,6 +1,6 @@
 module github.com/blacktop/go-foundationmodels/cmd/found
 
-go 1.24
+go 1.25
 
 require (
 	github.com/apex/log v1.9.0
@@ -13,7 +13,6 @@ require (
 replace github.com/blacktop/go-foundationmodels => ../..
 
 require (
-	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
